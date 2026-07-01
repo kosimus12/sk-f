@@ -73,6 +73,10 @@ export class HubState {
           tasks: this.d.tasks,
           messages: this.d.messages.slice(0, 100),
           coworkers: this.d.coworkers,
+          // Nur Meta (ohne Text) — damit das Dashboard "neuere Version verfuegbar" zeigen kann,
+          // ohne bei jedem Refresh die evtl. gerade bearbeitete Textarea zu ueberschreiben.
+          memory: { version: this.d.memory.version, updatedAt: this.d.memory.updatedAt, updatedBy: this.d.memory.updatedBy },
+          memoryVersion: this.d.memory.version,
           serverTime: now(),
         };
 
