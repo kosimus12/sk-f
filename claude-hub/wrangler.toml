@@ -1,0 +1,21 @@
+name = "claude-hub"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Der Hub-Zustand (Sessions, Aufgaben, Nachrichten-Bus) lebt in EINEM
+# Durable Object -> starke Konsistenz, ideal fuer Orchestrierung.
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "HubState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HubState"]
+
+# --- KEINE Secrets hier eintragen! ---
+# Secrets werden per `wrangler secret put` gesetzt (siehe README):
+#   DASHBOARD_PASSWORD   Login-Passwort fuers Dashboard
+#   TOTP_SECRET          Base32-Secret fuer den 2FA-Code
+#   HUB_SECRET           Zufalls-Secret zum Signieren der Login-Tokens
+#   AGENT_TOKEN          Zufalls-Secret, mit dem sich die Bruecken-Agenten anmelden

@@ -1,0 +1,13 @@
+{
+  "name": "claude-hub",
+  "version": "1.0.0",
+  "description": "Sicheres Dashboard + Orchestrierungs-Hub für mehrere Claude-Code-Instanzen (Mac, Hetzner) mit gemeinsamem Gedächtnis, Coworker-/MCP-Delegation und Telegram-Zugang.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "setup": "node scripts/setup-secrets.mjs",
+    "bridge": "node bridge/claude-bridge.mjs"
+  }
+}

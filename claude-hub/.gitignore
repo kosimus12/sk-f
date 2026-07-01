@@ -1,0 +1,12 @@
+# NIEMALS committen: Secrets, lokaler Zustand, Wrangler-Interna
+.dev.vars
+.env
+*.local
+.wrangler/
+node_modules/
+# Lokaler Bridge-Zustand (liegt normalerweise in ~/.claude-hub, hier nur zur Sicherheit)
+config.json
+state.json
+shared-memory.md
+inbox.log
+next-input.txt
