@@ -1,28 +1,24 @@
 #!/bin/bash
-# Claude (Pro Max) — startet Claude Code mit deinem Max-Abo statt Amazon Bedrock.
+# Claude (Pro Max) — nutzt einen EIGENEN Konfig-Ordner ohne die Bedrock-
+# Einstellung aus ~/.claude/settings.json, damit dein Max-Abo verwendet wird.
 # Doppelklickbar auf dem Mac-Desktop (.command öffnet automatisch das Terminal).
 
-# Bedrock / Vertex / API-Key / AWS aus der Umgebung entfernen
-# -> Claude nutzt dann dein eingeloggtes Pro-/Max-Konto (Abo).
-unset CLAUDE_CODE_USE_BEDROCK
-unset CLAUDE_CODE_USE_VERTEX
-unset ANTHROPIC_API_KEY
-unset ANTHROPIC_AUTH_TOKEN
-unset ANTHROPIC_BASE_URL
-unset ANTHROPIC_MODEL
-unset AWS_BEARER_TOKEN_BEDROCK
-unset AWS_PROFILE
-unset AWS_REGION
-unset AWS_DEFAULT_REGION
+# Eigener Konfig-Ordner -> die Bedrock-settings.json des Standard-Claude greift hier NICHT.
+export CLAUDE_CONFIG_DIR="$HOME/.claude-max"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+# Sicherheitshalber Bedrock/API/AWS aus der Umgebung nehmen.
+unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX ANTHROPIC_API_KEY \
+      ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL \
+      AWS_BEARER_TOKEN_BEDROCK AWS_PROFILE AWS_REGION AWS_DEFAULT_REGION
 
 cd "$HOME"
 
 if ! command -v claude >/dev/null 2>&1; then
-  echo "❌ 'claude' (Claude Code) nicht gefunden. Bitte installieren und erneut versuchen."
-  echo "Drücke eine Taste zum Schließen…"; read -r -n 1
-  exit 1
+  echo "❌ 'claude' (Claude Code) nicht gefunden."; echo "Taste drücken zum Schließen…"; read -r -n 1; exit 1
 fi
 
-echo "🟢 Starte Claude mit deinem Pro-Max-Konto (Bedrock deaktiviert)…"
+echo "🟢 Claude (Pro Max) — eigenes Profil, kein Bedrock."
+echo "   Beim ERSTEN Start bitte mit deinem Max-Konto anmelden (Auswahl: Claude-Konto/Abo)."
 echo
 exec claude
