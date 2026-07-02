@@ -18,6 +18,8 @@ export class HubState {
         inbox: (await this.state.storage.get("inbox")) || {}, // agentId -> [items]
         memory: (await this.state.storage.get("memory")) ||
           { text: "# Gemeinsames Gedächtnis aller Claudes\n\n(Noch leer — im Dashboard bearbeiten.)\n", version: 0, updatedAt: 0, updatedBy: "system" },
+        // Von den Bruecken gemeldete Chats/Sessions je Agent (Cowork + Claude Code).
+        sessionsByAgent: (await this.state.storage.get("sessionsByAgent")) || {},
         seq: (await this.state.storage.get("seq")) || 1,
       };
     });
@@ -77,6 +79,16 @@ export class HubState {
           // ohne bei jedem Refresh die evtl. gerade bearbeitete Textarea zu ueberschreiben.
           memory: { version: this.d.memory.version, updatedAt: this.d.memory.updatedAt, updatedBy: this.d.memory.updatedBy },
           memoryVersion: this.d.memory.version,
+          // Chats/Sessions je Quelle (Mac Cowork, Mac Claude Code, Hetzner …).
+          sessions: Object.entries(this.d.sessionsByAgent).map(([agentId, v]) => ({
+            agentId,
+            name: this.d.agents[agentId]?.name || agentId,
+            model: this.d.agents[agentId]?.model || "",
+            source: v.source || this.d.agents[agentId]?.name || agentId,
+            online: now() - (this.d.agents[agentId]?.lastSeen || 0) < 45000,
+            updatedAt: v.updatedAt,
+            items: v.items || [],
+          })),
           serverTime: now(),
         };
 
@@ -227,6 +239,19 @@ export class HubState {
         else this.d.coworkers.push({ name: m.name, actions: m.actions || [], providedBy: m.providedBy, ts: now() });
         await this.persist(["coworkers"]);
         return { ok: true };
+      }
+
+      // ---------- Chats/Sessions einer Bruecke melden ----------
+      case "sessions": {
+        const a = this.d.agents[m.agentId];
+        if (a) a.lastSeen = now();
+        this.d.sessionsByAgent[m.agentId] = {
+          source: m.source || (a && a.name) || m.agentId,
+          updatedAt: now(),
+          items: Array.isArray(m.items) ? m.items.slice(0, 300) : [],
+        };
+        await this.persist(["sessionsByAgent", "agents"]);
+        return { ok: true, count: (m.items || []).length };
       }
 
       // ---------- Gemeinsames Gedaechtnis (fuer ALLE Claudes synchron) ----------
