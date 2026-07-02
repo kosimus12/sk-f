@@ -13,7 +13,7 @@
 
 import { createServer } from 'node:http';
 import { spawnSync, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -91,7 +91,20 @@ const cfg = {
   TELEGRAM_HANDLER: pick('TELEGRAM_HANDLER', fileCfg, 'TELEGRAM_HANDLER', '1'),
   // Timeout für headless Claude-Aufrufe (ms)
   CLAUDE_TIMEOUT_MS: parseInt(pick('CLAUDE_TIMEOUT_MS', fileCfg, 'CLAUDE_TIMEOUT_MS', '180000'), 10),
+  // --- Session-/Chat-Scanner ---
+  // Anzeigename der Quelle im Dashboard (z.B. „Mac", „Mac (Max)", „Hetzner").
+  SOURCE_LABEL: pick('SOURCE_LABEL', fileCfg, 'SOURCE_LABEL', ''),
+  // Scan-Intervall (ms)
+  SCAN_MS: parseInt(pick('SCAN_MS', fileCfg, 'SCAN_MS', '60000'), 10),
+  // Scanner an/aus
+  SCAN_CODE: pick('SCAN_CODE', fileCfg, 'SCAN_CODE', '1'),
+  SCAN_COWORK: pick('SCAN_COWORK', fileCfg, 'SCAN_COWORK', '1'),
+  // Basisverzeichnis von Claude Code (Sessions unter <CLAUDE_HOME>/projects/…)
+  CLAUDE_HOME: pick('CLAUDE_HOME', fileCfg, 'CLAUDE_HOME', join(HOME, '.claude')),
 };
+
+// SOURCE_LABEL: Default = AGENT_NAME
+if (!cfg.SOURCE_LABEL) cfg.SOURCE_LABEL = cfg.AGENT_NAME;
 
 // Normalisiere HUB_URL (kein abschließender Slash)
 cfg.HUB_URL = (cfg.HUB_URL || '').replace(/\/+$/, '');
@@ -675,6 +688,249 @@ function startControlServer() {
 }
 
 // ---------------------------------------------------------------------------
+// Session-/Chat-Scanner
+// ---------------------------------------------------------------------------
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_CODE_SESSIONS = 100; // nur die neuesten N Sessions je Scan melden
+
+// Kürzt einen String auf max. n Zeichen (mit … am Ende).
+function truncate(s, n) {
+  const str = String(s || '').replace(/\s+/g, ' ').trim();
+  if (str.length <= n) return str;
+  return str.slice(0, n - 1).trimEnd() + '…';
+}
+
+// Dekodiert den von Claude Code kodierten Projektordnernamen.
+// Claude Code ersetzt „/" durch „-"; führendes „-" entfernen.
+// Rückgabe: { path, short } – short = letzter Pfadbestandteil.
+function decodeProjectDir(dirName) {
+  let s = String(dirName || '');
+  // führende Bindestriche entfernen (kodierter absoluter Pfad)
+  const path = s.replace(/^-+/, '').replace(/-/g, '/');
+  const parts = path.split('/').filter(Boolean);
+  const short = parts.length ? parts[parts.length - 1] : (s || '(unbekannt)');
+  return { path: '/' + path, short };
+}
+
+// Extrahiert den Text aus einem message.content (String ODER Array von Blöcken).
+function extractMessageText(content) {
+  if (content == null) return '';
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const texts = [];
+    for (const block of content) {
+      if (block && typeof block === 'object') {
+        if (typeof block.text === 'string' && (block.type === 'text' || !block.type)) {
+          texts.push(block.text);
+        }
+      } else if (typeof block === 'string') {
+        texts.push(block);
+      }
+    }
+    return texts.join(' ');
+  }
+  return '';
+}
+
+// Liest die ersten ~maxLines Zeilen einer JSONL-Datei und sucht die erste
+// sinnvolle Nutzer-Nachricht. Robust gegen kaputte Zeilen.
+function firstUserTitle(filePath, maxLines = 20) {
+  let raw = '';
+  try { raw = readFileSync(filePath, 'utf8'); } catch { return ''; }
+  const lines = raw.split('\n', maxLines + 5).slice(0, maxLines);
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    let obj;
+    try { obj = JSON.parse(t); } catch { continue; }
+    if (!obj || typeof obj !== 'object') continue;
+    const isUser = obj.type === 'user' ||
+      (obj.message && typeof obj.message === 'object' && obj.message.role === 'user');
+    if (!isUser) continue;
+    // Text ermitteln
+    let content;
+    if (obj.message && typeof obj.message === 'object') content = obj.message.content;
+    else content = obj.content;
+    const text = extractMessageText(content).trim();
+    // Slash-/Meta-Kommandos und leere Texte überspringen
+    if (!text) continue;
+    // Command-Wrapper (z.B. <command-name>…) grob rausfiltern
+    if (/^<command-name>/.test(text) || /^<local-command/.test(text)) continue;
+    return text;
+  }
+  return '';
+}
+
+// Scannt Claude-Code-Sessions (JSONL unter CLAUDE_HOME/projects/<encoded>/<uuid>.jsonl).
+function scanClaudeCode() {
+  const items = [];
+  const projectsRoot = join(cfg.CLAUDE_HOME, 'projects');
+  if (!existsSync(projectsRoot)) return items;
+
+  // Alle .jsonl-Dateien mit mtime einsammeln
+  const found = [];
+  let projectDirs = [];
+  try { projectDirs = readdirSync(projectsRoot); } catch { return items; }
+  for (const dirName of projectDirs) {
+    const dirPath = join(projectsRoot, dirName);
+    let st;
+    try { st = statSync(dirPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    const { short } = decodeProjectDir(dirName);
+    let files = [];
+    try { files = readdirSync(dirPath); } catch { continue; }
+    for (const f of files) {
+      if (!f.endsWith('.jsonl')) continue;
+      const fp = join(dirPath, f);
+      let fst;
+      try { fst = statSync(fp); } catch { continue; }
+      if (!fst.isFile()) continue;
+      found.push({
+        id: f.slice(0, -'.jsonl'.length),
+        filePath: fp,
+        mtime: fst.mtimeMs,
+        projectShort: short,
+      });
+    }
+  }
+
+  // Nach mtime absteigend sortieren, nur die neuesten N
+  found.sort((a, b) => b.mtime - a.mtime);
+  const slice = found.slice(0, MAX_CODE_SESSIONS);
+  const now = Date.now();
+
+  for (const s of slice) {
+    let title = '';
+    try { title = firstUserTitle(s.filePath); } catch { title = ''; }
+    title = truncate(title || s.projectShort, 80);
+    items.push({
+      id: s.id,
+      kind: 'code',
+      title,
+      status: (now - s.mtime) < DAY_MS ? 'open' : 'done',
+      pinned: false,
+      lastActivity: Math.round(s.mtime),
+      project: s.projectShort,
+    });
+  }
+  return items;
+}
+
+// Best-effort: sucht einen lokalen Claude-Cowork-Chat-Speicher (macOS).
+// Gibt { items, checked, storeFound } zurück.
+function scanClaudeCowork() {
+  const candidates = [
+    join(HOME, 'Library', 'Application Support', 'Claude'),
+    join(HOME, 'Library', 'Application Support', 'Claude', 'Cowork'),
+    join(HOME, 'Library', 'Application Support', 'Claude', 'cowork'),
+    join(HOME, 'Library', 'Application Support', 'Claude', 'Local Storage'),
+    join(HOME, 'Library', 'Application Support', 'Claude', 'IndexedDB'),
+    join(cfg.CLAUDE_HOME, 'cowork'),
+  ];
+  const items = [];
+  const existing = [];
+  for (const dir of candidates) {
+    if (existsSync(dir)) existing.push(dir);
+  }
+
+  // In existierenden Kandidaten nach parsebaren Chat-JSON-Dateien suchen.
+  for (const dir of existing) {
+    let entries = [];
+    try { entries = readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (!name.toLowerCase().endsWith('.json')) continue;
+      const fp = join(dir, name);
+      let fst;
+      try { fst = statSync(fp); } catch { continue; }
+      if (!fst.isFile() || fst.size > 5 * 1024 * 1024) continue;
+      let data;
+      try { data = JSON.parse(readFileSync(fp, 'utf8')); } catch { continue; }
+      // Chats können ein einzelnes Objekt oder ein Array/verschachtelt sein.
+      const chats = Array.isArray(data) ? data
+        : (Array.isArray(data && data.chats) ? data.chats
+          : (data && typeof data === 'object' ? [data] : []));
+      for (const chat of chats) {
+        if (!chat || typeof chat !== 'object') continue;
+        // Nur wenn es wie ein Chat aussieht (title/pinned/status/updatedAt).
+        const looksLikeChat = ('title' in chat) &&
+          (('pinned' in chat) || ('status' in chat) || ('updatedAt' in chat));
+        if (!looksLikeChat) continue;
+        const updated = chat.updatedAt != null ? Number(new Date(chat.updatedAt).getTime() || chat.updatedAt) : fst.mtimeMs;
+        items.push({
+          id: String(chat.id || chat.uuid || name),
+          kind: 'cowork',
+          title: truncate(chat.title || '(Cowork-Chat)', 80),
+          status: chat.status === 'done' ? 'done' : 'open',
+          pinned: !!chat.pinned,
+          lastActivity: Math.round(Number.isFinite(updated) ? updated : fst.mtimeMs),
+          project: chat.project ? String(chat.project) : undefined,
+        });
+      }
+    }
+  }
+
+  return { items, checked: candidates, storeFound: items.length > 0 };
+}
+
+let coworkNoticeLogged = false;
+
+async function runScan() {
+  let items = [];
+  let codeCount = 0;
+  let coworkCount = 0;
+
+  if (String(cfg.SCAN_CODE) !== '0') {
+    try {
+      const codeItems = scanClaudeCode();
+      codeCount = codeItems.length;
+      items = items.concat(codeItems);
+    } catch (e) { warn(`Code-Scan-Fehler: ${e.message}`); }
+  }
+
+  if (String(cfg.SCAN_COWORK) !== '0') {
+    try {
+      const { items: coworkItems, checked, storeFound } = scanClaudeCowork();
+      coworkCount = coworkItems.length;
+      items = items.concat(coworkItems);
+      if (!storeFound && !coworkNoticeLogged) {
+        coworkNoticeLogged = true;
+        info('Cowork-Chats evtl. nur im Claude-Konto (Cloud) – lokal nichts gefunden. ' +
+          `Geprüft: ${checked.join(', ')}`);
+      }
+    } catch (e) { warn(`Cowork-Scan-Fehler: ${e.message}`); }
+  }
+
+  if (!agentId) return { codeCount, coworkCount };
+
+  try {
+    const r = await hubPost('/api/agent/sessions', {
+      agentId,
+      source: cfg.SOURCE_LABEL,
+      items,
+    });
+    if (r.ok) {
+      const cnt = (r.data && r.data.count != null) ? r.data.count : items.length;
+      info(`Sessions gemeldet: ${cnt} (code=${codeCount}, cowork=${coworkCount})`);
+    } else {
+      warn('Sessions konnten nicht an den Hub gemeldet werden.');
+    }
+  } catch (e) {
+    warn(`Sessions-Meldung fehlgeschlagen: ${e.message}`);
+  }
+  return { codeCount, coworkCount };
+}
+
+let scanTimer = null;
+function startScanLoop() {
+  const tick = async () => {
+    try { await runScan(); } catch (e) { warn(`Scan-Fehler: ${e.message}`); }
+    scanTimer = setTimeout(tick, cfg.SCAN_MS);
+  };
+  // Kleiner Anfangsverzug, damit die Registrierung zuerst greift.
+  scanTimer = setTimeout(tick, 2000);
+}
+
+// ---------------------------------------------------------------------------
 // Sauberes Herunterfahren
 // ---------------------------------------------------------------------------
 let heartbeatTimer = null;
@@ -687,6 +943,7 @@ async function shutdown(signal) {
   warn(`${signal} empfangen, melde 'offline' und beende...`);
   if (heartbeatTimer) clearTimeout(heartbeatTimer);
   if (pollTimer) clearTimeout(pollTimer);
+  if (scanTimer) clearTimeout(scanTimer);
   try {
     if (agentId) {
       await hubPost('/api/agent/heartbeat', {
@@ -726,9 +983,32 @@ async function main() {
     warn('Starte trotzdem – Poll-Schleife versucht Re-Register mit Backoff.');
   }
 
+  // Einmalige Info zum Session-/Chat-Scanner beim Start.
+  info(`Session-Scanner: Quelle „${cfg.SOURCE_LABEL}" | Intervall ${cfg.SCAN_MS}ms | ` +
+    `Code ${String(cfg.SCAN_CODE) === '0' ? 'aus' : 'an'} | Cowork ${String(cfg.SCAN_COWORK) === '0' ? 'aus' : 'an'}`);
+  try {
+    let codeInfo = 0;
+    let coworkStore = false;
+    if (String(cfg.SCAN_CODE) !== '0') {
+      codeInfo = scanClaudeCode().length;
+    }
+    if (String(cfg.SCAN_COWORK) !== '0') {
+      const cw = scanClaudeCowork();
+      coworkStore = cw.storeFound;
+      if (!cw.storeFound) {
+        coworkNoticeLogged = true;
+        info('Cowork-Chats evtl. nur im Claude-Konto (Cloud) – lokal nichts gefunden. ' +
+          `Geprüft: ${cw.checked.join(', ')}`);
+      }
+    }
+    info(`Scanner-Start: ${codeInfo} Claude-Code-Session(s) gefunden; ` +
+      `Cowork-Store: ${coworkStore ? 'gefunden' : 'keiner'}.`);
+  } catch (e) { warn(`Scanner-Startinfo-Fehler: ${e.message}`); }
+
   startControlServer();
   startHeartbeatLoop();
   startPollLoop();
+  if (String(cfg.SCAN_CODE) !== '0' || String(cfg.SCAN_COWORK) !== '0') startScanLoop();
 
   ok('Brücken-Agent läuft. Strg+C zum Beenden.');
 }

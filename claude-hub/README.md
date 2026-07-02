@@ -385,7 +385,45 @@ in Telegram.
 
 ---
 
-## 12. Sicherheit
+## 12. Chats & Sessions
+
+Die Bridge scannt regelmäßig lokale Claude-Chats/Sessions und meldet sie an den
+Hub (`POST /api/agent/sessions`), damit du im Dashboard je Maschine siehst,
+welche Sessions offen/erledigt sind.
+
+**Was wird gescannt?**
+
+- **Claude Code (zuverlässig, lokal):** Alle Sessions unter
+  `~/.claude/projects/<projekt>/<uuid>.jsonl`. Pro Session werden Titel (erste
+  sinnvolle Nutzer-Nachricht, auf ~80 Zeichen gekürzt), Projekt-Kurzname,
+  letzte Aktivität (Datei-mtime) und Status gemeldet (`open`, wenn jünger als
+  24 h, sonst `done`). Es werden nur die **neuesten ~100 Sessions** je Scan
+  gemeldet (nach Aktivität sortiert), um Tokens/Last zu sparen.
+- **Claude Cowork (best effort):** Die Bridge prüft mögliche lokale
+  Cowork-Speicherorte (v.a. macOS unter
+  `~/Library/Application Support/Claude/…` sowie `~/.claude/cowork/`). Findet
+  sie dort parsebare Chat-Daten (Felder wie `title`/`pinned`/`status`/
+  `updatedAt`), werden sie als Cowork-Chats gemeldet. Cowork-Chats liegen
+  aber häufig **nur serverseitig im Claude-Konto (Cloud)** – dann findet die
+  Bridge lokal nichts und meldet auch nichts. Sie loggt in diesem Fall
+  **einmalig beim Start** die geprüften Kandidaten-Pfade, damit ein lokaler
+  Speicherort später gezielt nachgetragen werden kann.
+
+**Neue Config-Werte** (env oder `~/.claude-hub/config.json`):
+
+- `SOURCE_LABEL` – Anzeigename der Quelle im Dashboard. **Pro Maschine sinnvoll
+  setzen**, z.B. `Mac`, `Mac (Max)` oder `Hetzner`. Default: `AGENT_NAME`.
+- `SCAN_MS` – Scan-Intervall in ms. Default `60000` (1 Minute).
+- `SCAN_CODE` – Claude-Code-Scan an (`1`, Default) / aus (`0`).
+- `SCAN_COWORK` – Cowork-Scan an (`1`, Default) / aus (`0`).
+- `CLAUDE_HOME` – Basisverzeichnis von Claude Code. Default `~/.claude`.
+
+Beim Start loggt die Bridge, wie viele Claude-Code-Sessions gefunden wurden und
+ob ein Cowork-Store gefunden wurde.
+
+---
+
+## 13. Sicherheit
 
 - **Login:** Passwort **und** 2FA (TOTP) – beides nötig.
 - **Agent-Token:** Jeder Bridge-Request trägt `x-agent-token`. Ohne gültiges
@@ -403,7 +441,7 @@ in Telegram.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **Agent erscheint als offline**
 - Läuft die Bridge? (`node bridge/claude-bridge.mjs` bzw.
