@@ -2,16 +2,22 @@
 // Exportiert drei Strings: HTML (index.html), CSS (style.css), APPJS (app.js).
 // Der Worker liefert sie unter /, /style.css und /app.js aus.
 //
+// Optik: angelehnt an die Design-Vorlage "Projekt-Cockpit" (helle Karten,
+// Pills, Header mit Eyebrow/Greeting/Datum + Stat-Karten, Slide-over fuer
+// Detail-Ansichten). Kein PIN-/FaceID-Lock — der bestehende Login
+// (Passwort + 2FA, Token in localStorage 'hub_token') bleibt unveraendert.
+//
 // WICHTIG — strikte CSP (default-src 'self'; script-src 'self'; style-src 'self'):
 //   - Kein Inline-<script>, kein Inline-<style>, keine style="..."/onclick="..."-Attribute.
 //   - Alles Styling in CSS-Klassen, alle Events via addEventListener in app.js.
 //   - element.style.xyz und classList per JS sind erlaubt.
-//   - Keine externen Ressourcen; System-Fonts.
+//   - Keine externen Ressourcen (KEINE Google Fonts); System-Font-Kette.
+//   - DOM nur via createElement/textContent (kein innerHTML mit ungeprueftem Text).
 //
-// Escaping-Hinweis: Weil diese Datei selbst Template-Literale nutzt, sind in den
-// enthaltenen Strings alle Backticks als \` und alle ${ als \${ escaped.
-// In app.js wird bewusst mit einfachen Anfuehrungszeichen / Konkatenation gearbeitet,
-// um Template-Literal-Escaping zu vermeiden.
+// Escaping-Hinweis: Weil diese Datei selbst Template-Literale nutzt, waeren in
+// den enthaltenen Strings Backticks als \` und ${ als \${ zu escapen. HTML/CSS
+// enthalten keine. In app.js wird bewusst mit einfachen Anfuehrungszeichen /
+// Konkatenation gearbeitet, um Template-Literal-Escaping zu vermeiden.
 
 // ---------------------------------------------------------------------------
 // HTML — index.html (kein Inline-Script/Style, laedt /style.css und /app.js)
@@ -22,7 +28,7 @@ export const HTML = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#f5f6f8">
   <title>Claude Hub — SK Finanzberatung</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -30,13 +36,10 @@ export const HTML = `<!doctype html>
   <!-- ==================== LOGIN ==================== -->
   <main id="login-screen" class="login-screen" aria-label="Anmeldung">
     <section class="login-card">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">SK</div>
-        <div class="brand-text">
-          <div class="brand-title">SK Finanzberatung</div>
-          <div class="brand-sub">Claude Hub</div>
-        </div>
-      </div>
+      <div class="login-badge" aria-hidden="true">SK</div>
+      <div class="login-eyebrow">CLAUDE HUB</div>
+      <h1 class="login-title">SK Finanzberatung</h1>
+      <p class="login-sub">Melde dich an, um dein Hub zu steuern.</p>
       <form id="login-form" class="login-form" novalidate>
         <label class="field">
           <span class="field-label">Passwort</span>
@@ -57,130 +60,174 @@ export const HTML = `<!doctype html>
 
   <!-- ==================== DASHBOARD ==================== -->
   <div id="dashboard" class="dashboard" hidden>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand brand-compact">
-          <div class="brand-mark" aria-hidden="true">SK</div>
-          <div class="brand-text">
-            <div class="brand-title">Claude Hub</div>
-            <div class="brand-sub">SK Finanzberatung</div>
+    <div class="page">
+      <!-- Header: Eyebrow, Greeting, Datum + 3 Stat-Karten -->
+      <header class="hero">
+        <div class="hero-head">
+          <div class="hero-left">
+            <div class="eyebrow">CLAUDE HUB</div>
+            <h1 id="greeting" class="greeting">Hallo</h1>
+            <div id="date-label" class="date-label"></div>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-card">
+              <div id="stat-online" class="stat-value">0</div>
+              <div class="stat-label">online</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-needs" class="stat-value stat-warn">0</div>
+              <div class="stat-label">braucht Input</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-tasks" class="stat-value">0</div>
+              <div class="stat-label">offene Aufgaben</div>
+            </div>
           </div>
         </div>
-        <div class="topbar-actions">
+        <div class="hero-bar">
           <span id="sync-status" class="sync-status" aria-live="polite">…</span>
-          <button id="refresh-btn" class="btn btn-ghost" type="button" title="Jetzt aktualisieren">Aktualisieren</button>
-          <button id="logout-btn" class="btn btn-ghost" type="button">Abmelden</button>
+          <button id="refresh-btn" class="btn btn-ghost btn-sm" type="button" title="Jetzt aktualisieren">Aktualisieren</button>
+          <button id="logout-btn" class="btn btn-ghost btn-sm" type="button">Abmelden</button>
         </div>
+      </header>
+
+      <main class="content">
+        <!-- Braucht deinen Input (wichtigster Bereich) -->
+        <section id="section-input" class="section" hidden>
+          <div class="card panel panel-alert">
+            <div class="panel-head">
+              <h2 class="panel-title">⚠️ Braucht deinen Input</h2>
+              <span id="input-count-badge" class="pill pill-warn">0 offen</span>
+            </div>
+            <p class="section-hint">Diese Eingaben brauchen deine Agenten gerade von dir — direkt beantworten.</p>
+            <div id="input-list" class="io-list"></div>
+          </div>
+        </section>
+
+        <!-- Broadcast -->
+        <section class="section">
+          <h2 class="section-title">📣 Broadcast an alle Agenten</h2>
+          <div class="card broadcast-card">
+            <textarea id="broadcast-text" class="textarea" rows="2"
+                      placeholder="Nachricht an alle Agenten…"></textarea>
+            <div class="card-actions">
+              <button id="broadcast-send" class="btn btn-primary" type="button">Senden</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Aktive Aufgaben -->
+        <section class="section">
+          <h2 class="section-title">🟢 Aktive Aufgaben</h2>
+          <div id="active-list" class="card-list"></div>
+        </section>
+
+        <!-- Erledigt (einklappbar) -->
+        <section class="section">
+          <h2 class="section-title section-title-toggle">
+            <button id="done-toggle" class="collapse-btn" type="button" aria-expanded="false">
+              <span class="chevron" aria-hidden="true">▸</span>
+              <span>✅ Erledigt</span>
+              <span id="done-count" class="badge badge-muted">0</span>
+            </button>
+          </h2>
+          <div id="done-list" class="card-list" hidden></div>
+        </section>
+
+        <!-- Meine Claudes (Agenten) -->
+        <section class="section">
+          <h2 class="section-title">🤖 Meine Claudes</h2>
+          <div id="agents-list" class="card-grid"></div>
+        </section>
+
+        <!-- Chats & Sessions je Quelle -->
+        <section class="section">
+          <h2 class="section-title">💬 Chats &amp; Sessions</h2>
+          <p class="section-hint">Chats und Claude-Code-Sessions je Quelle. Nur zur Ansicht.</p>
+          <div id="sessions-list" class="sessions-list"></div>
+        </section>
+
+        <!-- Coworker (MCP-Dienste) -->
+        <section class="section">
+          <h2 class="section-title">🔌 Coworker</h2>
+          <p class="section-hint">Delegiere Arbeit an einen günstigeren Agenten (z.&nbsp;B. Opus&nbsp;4.6), um Tokens zu sparen.</p>
+          <div class="card">
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label">Coworker</span>
+                <select id="cw-coworker" class="select"></select>
+              </label>
+              <label class="field">
+                <span class="field-label">Aktion</span>
+                <select id="cw-action" class="select"></select>
+              </label>
+              <label class="field">
+                <span class="field-label">Ziel-Agent (optional)</span>
+                <select id="cw-target" class="select"></select>
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">Parameter (JSON, optional)</span>
+              <textarea id="cw-params" class="textarea mono" rows="3" placeholder="{ }"></textarea>
+            </label>
+            <p id="cw-error" class="field-error" role="alert" hidden></p>
+            <div class="card-actions">
+              <button id="cw-send" class="btn btn-primary" type="button">Aktion auslösen</button>
+            </div>
+            <div id="cw-empty" class="empty-note" hidden>Keine Coworker verfügbar.</div>
+          </div>
+        </section>
+
+        <!-- Gemeinsames Gedächtnis (shared memory) -->
+        <section class="section">
+          <h2 class="section-title section-title-toggle">
+            <button id="mem-toggle" class="collapse-btn" type="button" aria-expanded="false">
+              <span class="chevron" aria-hidden="true">▸</span>
+              <span>🧠 Gemeinsames Gedächtnis</span>
+              <span id="mem-newer" class="badge badge-needs_input" hidden></span>
+            </button>
+          </h2>
+          <div id="mem-body" class="card" hidden>
+            <p class="section-hint">Dieser Text ist für ALLE deine Claudes gleich. Nach dem Speichern synchronisieren sich alle Agenten automatisch.</p>
+            <div class="mem-meta-row">
+              <span id="mem-meta" class="card-meta">…</span>
+              <button id="mem-reload" class="btn btn-ghost btn-sm" type="button">Neu laden</button>
+            </div>
+            <textarea id="mem-text" class="textarea mono mem-textarea" rows="12"
+                      placeholder="Gemeinsamer Kontext für alle Agenten…" spellcheck="false"></textarea>
+            <div class="card-actions">
+              <button id="mem-save" class="btn btn-primary" type="button">Speichern &amp; an alle verteilen</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Aktivitaets-Feed -->
+        <section class="section">
+          <h2 class="section-title">🕘 Aktivität</h2>
+          <ul id="feed-list" class="feed"></ul>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>SK Finanzberatung · Claude Hub</span>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Slide-over (Detail-Ansicht fuer Agenten/Aufgaben) -->
+  <div id="slideover" class="slideover" hidden>
+    <div id="so-backdrop" class="so-backdrop"></div>
+    <aside class="so-panel" role="dialog" aria-modal="true" aria-labelledby="so-title">
+      <div class="so-head">
+        <div class="so-head-text">
+          <div id="so-eyebrow" class="eyebrow"></div>
+          <h2 id="so-title" class="so-title"></h2>
+        </div>
+        <button id="so-close" class="so-close" type="button" aria-label="Schließen">×</button>
       </div>
-    </header>
-
-    <main class="content">
-      <!-- Braucht deinen Input (wichtigster Bereich) -->
-      <section id="section-input" class="section section-alert" hidden>
-        <h2 class="section-title">⚠️ Braucht deinen Input</h2>
-        <div id="input-list" class="card-list"></div>
-      </section>
-
-      <!-- Broadcast -->
-      <section class="section">
-        <h2 class="section-title">📣 Broadcast an alle Agenten</h2>
-        <div class="card broadcast-card">
-          <textarea id="broadcast-text" class="textarea" rows="2"
-                    placeholder="Nachricht an alle Agenten…"></textarea>
-          <div class="card-actions">
-            <button id="broadcast-send" class="btn btn-primary" type="button">Senden</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Aktive Aufgaben -->
-      <section class="section">
-        <h2 class="section-title">🟢 Aktive Aufgaben</h2>
-        <div id="active-list" class="card-list"></div>
-      </section>
-
-      <!-- Erledigt (einklappbar) -->
-      <section class="section">
-        <h2 class="section-title section-title-toggle">
-          <button id="done-toggle" class="collapse-btn" type="button" aria-expanded="false">
-            <span class="chevron" aria-hidden="true">▸</span>
-            <span>Erledigt</span>
-            <span id="done-count" class="badge badge-muted">0</span>
-          </button>
-        </h2>
-        <div id="done-list" class="card-list" hidden></div>
-      </section>
-
-      <!-- Meine Claudes (Agenten) -->
-      <section class="section">
-        <h2 class="section-title">🤖 Meine Claudes</h2>
-        <div id="agents-list" class="card-list"></div>
-      </section>
-
-      <!-- Coworker (MCP-Dienste) -->
-      <section class="section">
-        <h2 class="section-title">🔌 Coworker</h2>
-        <p class="section-hint">Delegiere Arbeit an einen günstigeren Agenten (z.&nbsp;B. Opus&nbsp;4.6), um Tokens zu sparen.</p>
-        <div class="card">
-          <div class="form-grid">
-            <label class="field">
-              <span class="field-label">Coworker</span>
-              <select id="cw-coworker" class="select"></select>
-            </label>
-            <label class="field">
-              <span class="field-label">Aktion</span>
-              <select id="cw-action" class="select"></select>
-            </label>
-            <label class="field">
-              <span class="field-label">Ziel-Agent (optional)</span>
-              <select id="cw-target" class="select"></select>
-            </label>
-          </div>
-          <label class="field">
-            <span class="field-label">Parameter (JSON, optional)</span>
-            <textarea id="cw-params" class="textarea mono" rows="3" placeholder="{ }"></textarea>
-          </label>
-          <p id="cw-error" class="field-error" role="alert" hidden></p>
-          <div class="card-actions">
-            <button id="cw-send" class="btn btn-primary" type="button">Aktion auslösen</button>
-          </div>
-          <div id="cw-empty" class="empty-note" hidden>Keine Coworker verfügbar.</div>
-        </div>
-      </section>
-
-      <!-- Gemeinsames Gedächtnis (shared memory) -->
-      <section class="section">
-        <h2 class="section-title section-title-toggle">
-          <button id="mem-toggle" class="collapse-btn" type="button" aria-expanded="false">
-            <span class="chevron" aria-hidden="true">▸</span>
-            <span>🧠 Gemeinsames Gedächtnis</span>
-            <span id="mem-newer" class="badge badge-needs_input" hidden></span>
-          </button>
-        </h2>
-        <div id="mem-body" class="card" hidden>
-          <p class="section-hint">Dieser Text ist für ALLE deine Claudes gleich. Nach dem Speichern synchronisieren sich alle Agenten automatisch.</p>
-          <div class="mem-meta-row">
-            <span id="mem-meta" class="card-meta">…</span>
-            <button id="mem-reload" class="btn btn-ghost btn-sm" type="button">Neu laden</button>
-          </div>
-          <textarea id="mem-text" class="textarea mono mem-textarea" rows="12"
-                    placeholder="Gemeinsamer Kontext für alle Agenten…" spellcheck="false"></textarea>
-          <div class="card-actions">
-            <button id="mem-save" class="btn btn-primary" type="button">Speichern &amp; an alle verteilen</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Aktivitaets-Feed -->
-      <section class="section">
-        <h2 class="section-title">🕘 Aktivität</h2>
-        <ul id="feed-list" class="feed"></ul>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <span>SK Finanzberatung · Claude Hub</span>
-    </footer>
+      <div id="so-pills" class="so-pills"></div>
+      <div id="so-body" class="so-body ck-scroll"></div>
+    </aside>
   </div>
 
   <!-- kleine Toast-Meldung -->
@@ -191,53 +238,77 @@ export const HTML = `<!doctype html>
 </html>`;
 
 // ---------------------------------------------------------------------------
-// CSS — style.css (mobile-first, Dark-Mode via prefers-color-scheme, Touch >=44px)
+// CSS — style.css (mobile-first, Design-Tokens der Vorlage, Dark-Mode ergaenzt)
 // ---------------------------------------------------------------------------
 export const CSS = `:root {
-  --bg: #f4f5f7;
+  /* Flaechen */
+  --bg: #f5f6f8;
   --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --primary: #1e40af;
-  --primary-hover: #1d4ed8;
-  --primary-text: #ffffff;
-  --alert-bg: #fef3c7;
-  --alert-border: #f59e0b;
-  --alert-text: #78350f;
-  --danger: #b91c1c;
+  --surface-2: #fafbfc;
+  --surface-3: #f7f8fa;
+  --border: #e7e9ee;
+  --border-2: #e2e5ea;
+  --border-soft: #eef0f4;
+  /* Text */
+  --text: #16181d;
+  --text-2: #2a2e38;
+  --text-3: #4b5160;
+  --muted: #8a90a0;
+  --muted-2: #9aa1ad;
+  /* Akzente */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-soft-bg: #eef0ff;
+  --primary-soft-border: #dcdffb;
+  --dark: #16181d;
   --ok: #16a34a;
-  --gray-dot: #94a3b8;
-  --radius: 14px;
-  --shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 1px 2px rgba(15, 23, 42, .04);
+  --ok-bg: #e7f6ee;
+  --warn: #d97706;
+  --warn-bg: #fdf2e6;
+  --err: #dc2626;
+  --err-bg: #fde8e8;
+  --info: #2563eb;
+  --token-green: #22c55e;
+  /* Form */
+  --radius: 16px;
+  --radius-lg: 18px;
+  --radius-sm: 11px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(16, 18, 29, .06), 0 1px 3px rgba(16, 18, 29, .05);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, .08);
   --touch: 44px;
-  --header-bg: #0f172a;
-  --header-text: #e2e8f0;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0b1120;
-    --surface: #111827;
-    --surface-2: #0f1729;
-    --border: #1f2937;
-    --text: #e5e7eb;
-    --text-muted: #94a3b8;
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
-    --primary-text: #0b1120;
-    --alert-bg: #422006;
-    --alert-border: #d97706;
-    --alert-text: #fde68a;
-    --danger: #f87171;
+    --bg: #0e1013;
+    --surface: #17191f;
+    --surface-2: #1c1f26;
+    --surface-3: #1c1f26;
+    --border: #2a2d35;
+    --border-2: #333741;
+    --border-soft: #262a32;
+    --text: #e9eaee;
+    --text-2: #d5d8de;
+    --text-3: #b7bcc6;
+    --muted: #8a90a0;
+    --muted-2: #7f8695;
+    --primary: #6366f1;
+    --primary-hover: #7c7ff5;
+    --primary-soft-bg: #23233a;
+    --primary-soft-border: #33345a;
+    --dark: #000000;
     --ok: #4ade80;
-    --gray-dot: #475569;
-    --shadow: 0 1px 3px rgba(0, 0, 0, .4);
-    --header-bg: #060a14;
-    --header-text: #e5e7eb;
+    --ok-bg: #12351f;
+    --warn: #f59e0b;
+    --warn-bg: #3a2a12;
+    --err: #f87171;
+    --err-bg: #3a1416;
+    --info: #60a5fa;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .45);
+    --shadow-btn: 0 1px 2px rgba(0, 0, 0, .4);
   }
 }
 
@@ -252,7 +323,10 @@ html, body {
   font-size: 16px;
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
+body.no-scroll { overflow: hidden; }
+::placeholder { color: var(--muted-2); }
 
 button, input, select, textarea { font-family: inherit; font-size: 1rem; color: inherit; }
 
@@ -262,77 +336,103 @@ button, input, select, textarea { font-family: inherit; font-size: 1rem; color: 
   align-items: center;
   justify-content: center;
   min-height: var(--touch);
-  padding: 10px 16px;
+  padding: 11px 18px;
   border: 1px solid transparent;
-  border-radius: 10px;
-  background: var(--surface-2);
+  border-radius: 12px;
+  background: var(--surface-3);
   color: var(--text);
   cursor: pointer;
   font-weight: 600;
+  font-size: .95rem;
   text-decoration: none;
-  transition: background .12s ease, opacity .12s ease;
+  box-shadow: var(--shadow-btn);
+  transition: background .12s ease, filter .12s ease, opacity .12s ease;
 }
-.btn:active { opacity: .85; }
+.btn:active { opacity: .88; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .btn-primary:hover { background: var(--primary-hover); }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--header-text); }
-.btn-ghost:hover { background: rgba(255, 255, 255, .08); }
-.btn-lg { min-height: 50px; width: 100%; font-size: 1.05rem; }
-.btn-danger { background: transparent; color: var(--danger); border-color: var(--border); }
+.btn-dark { background: var(--dark); color: #fff; border-color: var(--dark); }
+.btn-dark:hover { filter: brightness(1.25); }
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--border-2);
+  color: var(--text-3);
+  box-shadow: none;
+}
+.btn-ghost:hover { background: var(--surface-3); }
+.btn-lg { min-height: 50px; width: 100%; font-size: 1.02rem; }
+.btn-sm { min-height: 38px; padding: 8px 14px; font-size: .85rem; }
+.btn-danger { background: var(--surface); color: var(--err); border-color: var(--border-2); box-shadow: none; }
+.btn-danger:hover { background: var(--err-bg); }
 
-/* ---------- Login ---------- */
+/* ---------- Login (dunkel, zentriert) ---------- */
 .login-screen {
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  padding-top: max(24px, env(safe-area-inset-top));
+  background: var(--dark);
+  color: #fff;
+  padding: 32px 24px;
+  padding-top: max(32px, env(safe-area-inset-top));
 }
 .login-card {
   width: 100%;
-  max-width: 400px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 28px 24px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
-.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.brand-compact { margin-bottom: 0; }
-.brand-mark {
-  width: 44px; height: 44px;
-  flex: 0 0 44px;
-  display: grid; place-items: center;
+.login-badge {
+  width: 54px; height: 54px;
+  border-radius: 16px;
   background: var(--primary);
-  color: var(--primary-text);
-  border-radius: 12px;
+  color: #fff;
+  display: grid;
+  place-items: center;
   font-weight: 800;
+  font-size: 20px;
   letter-spacing: .5px;
+  margin-bottom: 20px;
 }
-.brand-title { font-weight: 700; font-size: 1.05rem; }
-.brand-sub { color: var(--text-muted); font-size: .85rem; }
-.login-form { display: flex; flex-direction: column; gap: 16px; }
+.login-eyebrow {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #8a90a0;
+}
+.login-title { margin: 6px 0 0; font-size: 22px; font-weight: 700; color: #fff; }
+.login-sub { margin: 8px 0 26px; font-size: 14px; color: #9aa1ad; max-width: 280px; }
+.login-form { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.login-screen .field-label { color: #aab0bc; }
+.login-screen input[type="text"], .login-screen input[type="password"] {
+  background: #23252c;
+  border: 1px solid #3a3d46;
+  color: #fff;
+}
+.login-screen input:focus { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
 .login-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: #fff;
   font-size: .9rem;
-  background: var(--alert-bg);
-  border: 1px solid var(--alert-border);
-  border-radius: 8px;
-  padding: 8px 12px;
+  background: rgba(220, 38, 38, .18);
+  border: 1px solid #dc2626;
+  border-radius: 10px;
+  padding: 9px 12px;
 }
 
 /* ---------- Felder ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { font-size: .82rem; color: var(--text-muted); font-weight: 600; }
+.field-label { font-size: .82rem; color: var(--muted); font-weight: 600; }
 input[type="text"], input[type="password"], .textarea, .select {
   width: 100%;
   min-height: var(--touch);
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  padding: 11px 13px;
+  border: 1px solid var(--border-2);
   border-radius: 10px;
   background: var(--surface-2);
   color: var(--text);
@@ -342,47 +442,66 @@ input[type="text"], input[type="password"], .textarea, .select {
 input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
+  border-color: var(--primary);
 }
-.field-error { color: var(--danger); font-size: .85rem; margin: 4px 0 0; }
+.field-error { color: var(--err); font-size: .85rem; margin: 4px 0 0; }
 
-/* ---------- Topbar ---------- */
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: var(--header-bg);
-  color: var(--header-text);
-  padding-top: env(safe-area-inset-top);
+/* ---------- Seiten-Layout ---------- */
+.page { max-width: 1080px; margin: 0 auto; padding: clamp(16px, 3vw, 32px); }
+
+/* ---------- Header ---------- */
+.hero { margin-bottom: 22px; }
+.hero-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
 }
-.topbar-inner {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 10px 14px;
+.eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.greeting {
+  margin: 6px 0 0;
+  font-size: clamp(26px, 3.4vw, 38px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+.date-label { margin-top: 4px; color: var(--muted); font-size: 15px; }
+.hero-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 16px;
+  min-width: 92px;
+  box-shadow: var(--shadow);
+}
+.stat-value { font-size: 24px; font-weight: 700; line-height: 1; }
+.stat-value.stat-warn { color: var(--warn); }
+.stat-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.hero-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
 }
-.topbar .brand-title { color: var(--header-text); }
-.topbar .brand-sub { color: #94a3b8; }
-.topbar-actions { display: flex; align-items: center; gap: 6px; }
-.sync-status { font-size: .78rem; color: #94a3b8; white-space: nowrap; }
-.sync-status.offline { color: #f87171; }
+.sync-status { flex: 1; font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.sync-status.offline { color: var(--err); }
 
-/* ---------- Content-Layout ---------- */
-.content { max-width: 900px; margin: 0 auto; padding: 16px 14px 40px; }
-.section { margin-bottom: 26px; }
-.section-title { font-size: 1.1rem; margin: 0 0 12px; font-weight: 700; }
-.section-hint { color: var(--text-muted); font-size: .88rem; margin: -6px 0 12px; }
-.section-alert {
-  background: var(--alert-bg);
-  border: 1px solid var(--alert-border);
-  border-radius: var(--radius);
-  padding: 14px;
-}
-.section-alert .section-title { color: var(--alert-text); }
+/* ---------- Content / Sections ---------- */
+.content { }
+.section { margin-bottom: 30px; }
+.section-title { font-size: 18px; margin: 0 0 14px; font-weight: 600; }
+.section-hint { color: var(--muted-2); font-size: .82rem; margin: -8px 0 14px; line-height: 1.45; }
 
-.section-title-toggle { margin: 0; }
+.section-title-toggle { margin: 0 0 14px; }
 .collapse-btn {
   display: flex;
   align-items: center;
@@ -392,126 +511,265 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 6px 0;
-  font-size: 1.1rem;
-  font-weight: 700;
+  padding: 4px 0;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--text);
 }
-.chevron { display: inline-block; transition: transform .15s ease; color: var(--text-muted); }
-.collapse-btn[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.chevron { display: inline-block; transition: transform .15s ease; color: var(--muted); }
+.collapse-btn[aria-expanded="true"] .chevron,
+.sess-collapse[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+
+/* ---------- Panel (Input-Bereich) ---------- */
+.panel { padding: 20px 22px; border-radius: var(--radius-lg); }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.panel-title { margin: 0; font-size: 18px; font-weight: 600; }
 
 /* ---------- Karten ---------- */
 .card-list { display: flex; flex-direction: column; gap: 12px; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px;
+  padding: 18px;
 }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.card-title { font-weight: 700; font-size: 1rem; margin: 0; }
-.card-meta { color: var(--text-muted); font-size: .82rem; margin-top: 2px; }
-.card-body { margin-top: 8px; }
-.card-question { margin: 8px 0; }
-.card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: flex-end; }
-.broadcast-card .card-actions { margin-top: 8px; }
+.card-open { cursor: pointer; border-radius: 10px; margin: -4px; padding: 4px; }
+.card-open:hover { background: var(--surface-3); }
+.card-open:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.card-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.card-title { font-weight: 600; font-size: 16px; margin: 0; }
+.open-chevron { color: #c2c7d0; font-size: 18px; line-height: 1; }
+.card-meta { color: var(--muted); font-size: .8rem; margin-top: 3px; }
+.card-body { margin-top: 10px; }
+.card-question {
+  margin: 10px 0 0;
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.card-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.broadcast-card .card-actions { margin-top: 10px; }
+.reply-row { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 
-.reply-row { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+/* ---------- Pills / Status ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+.pill-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 7px; }
+.pill-ok { background: var(--ok-bg); color: var(--ok); }
+.pill-warn { background: var(--warn-bg); color: var(--warn); }
+.pill-err { background: var(--err-bg); color: var(--err); }
+.pill-info { background: var(--primary-soft-bg); color: var(--primary); }
+.pill-muted { background: var(--surface-3); color: var(--text-3); border: 1px solid var(--border-soft); }
 
-/* ---------- Badges & Status ---------- */
+/* Zaehler-Badge (Erledigt / neuere Memory-Version) */
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
   font-size: .72rem;
   font-weight: 700;
   white-space: nowrap;
 }
-.badge-muted { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
-.badge-open { background: #dbeafe; color: #1e3a8a; }
-.badge-working { background: #fef9c3; color: #854d0e; }
-.badge-needs_input { background: var(--alert-bg); color: var(--alert-text); }
-.badge-done { background: #dcfce7; color: #166534; }
-.badge-error { background: #fee2e2; color: #991b1b; }
-.badge-idle { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
-.badge-offline { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+.badge-muted { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border); }
+.badge-needs_input { background: var(--warn-bg); color: var(--warn); }
 
-@media (prefers-color-scheme: dark) {
-  .badge-open { background: #1e3a8a; color: #dbeafe; }
-  .badge-working { background: #713f12; color: #fef9c3; }
-  .badge-done { background: #14532d; color: #dcfce7; }
-  .badge-error { background: #7f1d1d; color: #fee2e2; }
-}
-
-.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--gray-dot); flex: 0 0 10px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 9px; }
 .dot-online { background: var(--ok); }
-.dot-offline { background: var(--gray-dot); }
+.dot-offline { background: var(--muted); }
 
-/* ---------- Agenten ---------- */
-.agent-head { display: flex; align-items: center; gap: 8px; }
-.agent-name { font-weight: 700; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.chip {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
+/* ---------- Input-Kacheln ("Braucht deinen Input") ---------- */
+.io-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.io-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 15px;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: .74rem;
-}
-.kv { display: flex; gap: 6px; font-size: .85rem; margin-top: 2px; }
-.kv .k { color: var(--text-muted); min-width: 62px; }
-
-/* ---------- Log / Detail ---------- */
-.detail-toggle {
-  background: transparent;
-  border: none;
-  color: var(--primary);
-  cursor: pointer;
-  padding: 6px 0;
-  font-size: .85rem;
-  font-weight: 600;
-  min-height: var(--touch);
-  text-align: left;
-}
-.log {
-  margin-top: 8px;
-  border-top: 1px dashed var(--border);
-  padding-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.log-entry { font-size: .85rem; display: flex; gap: 8px; }
-.log-who { color: var(--text-muted); font-weight: 600; min-width: 70px; }
-.log-ts { color: var(--text-muted); font-size: .72rem; }
-.log-text { white-space: pre-wrap; word-break: break-word; }
+.io-eyebrow {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.io-title { font-size: 14.5px; font-weight: 600; line-height: 1.3; margin-top: 4px; }
+.io-question { font-size: 13px; color: var(--text-3); line-height: 1.45; margin-top: 2px; }
+.io-meta { font-size: 12px; color: var(--muted-2); margin-top: 2px; }
+
+/* ---------- Agenten ---------- */
+.agent-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-name { font-weight: 600; font-size: 16px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+  color: var(--text-3);
+  font-size: .74rem;
+}
+.kv { display: flex; gap: 8px; font-size: .86rem; margin-top: 3px; }
+.kv .k { color: var(--muted); min-width: 68px; }
+.kv .v { color: var(--text-2); }
+
+/* ---------- Chats & Sessions ---------- */
+.sessions-list { display: flex; flex-direction: column; gap: 16px; }
+.source-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+.source-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.source-title-wrap { display: flex; flex-direction: column; min-width: 0; }
+.source-title { font-size: 15px; font-weight: 600; line-height: 1.2; }
+.source-model { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.sess-groups { display: flex; flex-direction: column; gap: 12px; }
+.sess-group { display: flex; flex-direction: column; }
+.sess-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  text-align: left;
+}
+.sess-collapse { cursor: pointer; min-height: 38px; }
+.sess-group-title { flex: 0 0 auto; }
+.sess-count {
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+.sess-list { display: flex; flex-direction: column; gap: 6px; }
+.sess-row {
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+}
+.sess-row-main { display: flex; align-items: baseline; gap: 10px; }
+.sess-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sess-time { flex: 0 0 auto; font-size: 11.5px; color: var(--muted-2); white-space: nowrap; }
+.sess-project { font-size: 11.5px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+
+/* ---------- Slide-over ---------- */
+.slideover { position: fixed; inset: 0; z-index: 60; }
+.so-backdrop { position: absolute; inset: 0; background: rgba(20, 22, 28, .45); }
+.so-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: min(440px, 100%);
+  background: var(--bg);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, .2);
+  display: flex;
+  flex-direction: column;
+  animation: soSlide .25s ease;
+}
+@keyframes soSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.so-head {
+  padding: 20px 22px;
+  padding-top: max(20px, env(safe-area-inset-top));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.so-head-text { min-width: 0; }
+.so-title { margin: 5px 0 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; word-break: break-word; }
+.so-close {
+  flex: none;
+  appearance: none;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+.so-close:hover { background: var(--surface-3); }
+.so-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 22px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.so-body { flex: 1; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 22px; }
+.so-section { }
+.so-section-title { margin-bottom: 10px; font-size: 12px; }
+.so-text { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--text-2); }
+.so-empty { color: var(--muted-2); font-size: .9rem; }
+.timeline { display: flex; flex-direction: column; gap: 12px; }
+.tl-item { display: flex; gap: 11px; align-items: flex-start; }
+.tl-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-top: 6px; }
+.tl-body { min-width: 0; }
+.tl-text { font-size: 14px; color: var(--text-2); line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.tl-when { font-size: 12px; color: var(--muted-2); margin-top: 1px; }
+.ck-scroll::-webkit-scrollbar { width: 8px; }
+.ck-scroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 8px; }
 
 /* ---------- Feed ---------- */
 .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.feed-item {
-  display: flex;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  align-items: flex-start;
-}
+.feed-item { display: flex; gap: 10px; padding: 9px 10px; border-radius: 10px; align-items: flex-start; }
 .feed-item:nth-child(odd) { background: var(--surface); }
 .feed-icon { flex: 0 0 22px; text-align: center; }
 .feed-body { flex: 1; min-width: 0; }
-.feed-text { font-size: .9rem; word-break: break-word; }
-.feed-time { color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
+.feed-text { font-size: .9rem; word-break: break-word; color: var(--text-2); }
+.feed-time { color: var(--muted); font-size: .74rem; white-space: nowrap; }
 
 /* ---------- Coworker-Formular ---------- */
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 12px; }
 @media (min-width: 620px) { .form-grid { grid-template-columns: 1fr 1fr 1fr; } }
-
-.empty-note, .empty { color: var(--text-muted); font-size: .9rem; padding: 8px 2px; }
+.empty-note, .empty { color: var(--muted-2); font-size: .9rem; padding: 8px 2px; }
 
 /* ---------- Gemeinsames Gedächtnis ---------- */
-.btn-sm { min-height: 36px; padding: 6px 12px; font-size: .85rem; }
 .mem-meta-row {
   display: flex;
   align-items: center;
@@ -520,39 +778,31 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
-.mem-meta-row .btn-ghost { color: var(--primary); border: 1px solid var(--border); }
-.mem-textarea {
-  min-height: 280px;
-  line-height: 1.5;
-  font-size: .9rem;
-  -webkit-overflow-scrolling: touch;
-}
+.mem-meta-row .btn-ghost { color: var(--primary); }
+.mem-textarea { min-height: 280px; line-height: 1.5; font-size: .9rem; -webkit-overflow-scrolling: touch; }
 
+/* ---------- Footer / Toast ---------- */
 .footer {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 20px 14px calc(20px + env(safe-area-inset-bottom));
-  color: var(--text-muted);
+  padding: 20px 0 calc(20px + env(safe-area-inset-bottom));
+  color: var(--muted);
   font-size: .8rem;
   text-align: center;
 }
-
-/* ---------- Toast ---------- */
 .toast {
   position: fixed;
   left: 50%;
   bottom: calc(20px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  background: var(--header-bg);
-  color: var(--header-text);
-  padding: 10px 16px;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  z-index: 50;
+  background: var(--dark);
+  color: #fff;
+  padding: 11px 18px;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  z-index: 90;
   font-size: .9rem;
   max-width: 90vw;
 }
-.toast.error { background: var(--danger); color: #fff; }
+.toast.error { background: var(--err); color: #fff; }
 
 [hidden] { display: none !important; }`;
 
@@ -571,14 +821,14 @@ export const APPJS = `'use strict';
   var lastSync = 0;        // Zeitpunkt des letzten erfolgreichen State-Abrufs
   var online = true;
   var serverSkew = 0;      // serverTime - clientTime (fuer relative Zeiten)
-  var expandedTasks = {};  // taskId -> true, wenn Detail aufgeklappt
-  var doneOpen = false;
-  var lastState = { agents: [], tasks: [], messages: [], coworkers: [] };
+  var doneOpen = false;    // "Erledigt"-Sektion aufgeklappt?
+  var sessOpen = {};       // srcKey -> true, wenn "Erledigt" einer Quelle offen
+  var lastState = { agents: [], tasks: [], messages: [], coworkers: [], sessions: [] };
 
   // Gemeinsames Gedächtnis: bewusst getrennt vom Auto-Refresh, damit die
   // Tipp-Eingabe des Nutzers nicht ueberschrieben wird.
   var memOpen = false;
-  var memLoaded = false;     // wurde der Text schon einmal geladen?
+  var memLoaded = false;       // wurde der Text schon einmal geladen?
   var memLoadedVersion = null; // Version, die aktuell in der Textarea steht
 
   // ===================== Kleine DOM-Helfer =====================
@@ -657,6 +907,7 @@ export const APPJS = `'use strict';
     try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
     token = null;
     stopPolling();
+    closeSlideover();
     el('dashboard').hidden = true;
     el('login-screen').hidden = false;
     var pw = el('login-password'); if (pw) pw.value = '';
@@ -671,6 +922,7 @@ export const APPJS = `'use strict';
   function showDashboard() {
     el('login-screen').hidden = true;
     el('dashboard').hidden = false;
+    updateHeaderTime();
     refresh();
     startPolling();
   }
@@ -735,6 +987,7 @@ export const APPJS = `'use strict';
         tasks: Array.isArray(state.tasks) ? state.tasks : [],
         messages: Array.isArray(state.messages) ? state.messages : [],
         coworkers: Array.isArray(state.coworkers) ? state.coworkers : [],
+        sessions: Array.isArray(state.sessions) ? state.sessions : [],
         // Falls der state eine Memory-Version mitliefert, durchreichen (optional).
         memory: state.memory,
         memoryVersion: state.memoryVersion
@@ -761,30 +1014,57 @@ export const APPJS = `'use strict';
     s.textContent = 'aktualisiert vor ' + secs + 's';
   }
 
-  // ===================== Render: Braucht Input =====================
-  function renderInput(tasks, agents) {
-    var section = el('section-input');
-    var list = el('input-list');
-    clear(list);
+  // ===================== Header (Greeting/Datum/Stats) =====================
+  function updateHeaderTime() {
+    var h = new Date().getHours();
+    var greeting = h < 11 ? 'Guten Morgen' : (h < 18 ? 'Guten Tag' : 'Guten Abend');
+    var g = el('greeting'); if (g) g.textContent = greeting;
+    var d = el('date-label');
+    if (d) {
+      try {
+        d.textContent = new Date().toLocaleDateString('de-DE',
+          { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      } catch (e) { d.textContent = ''; }
+    }
+  }
 
+  function updateHeaderStats(state, inputCount) {
+    var onlineAgents = state.agents.filter(function (a) { return a.online; }).length;
+    var openTasks = state.tasks.filter(function (t) {
+      return t.status === 'open' || t.status === 'working';
+    }).length;
+    el('stat-online').textContent = String(onlineAgents);
+    el('stat-needs').textContent = String(inputCount);
+    el('stat-tasks').textContent = String(openTasks);
+  }
+
+  // ===================== Braucht Input =====================
+  // Sammelt alle offenen Eingaben (Tasks + Agenten mit needs_input).
+  function collectInputs(tasks, agents) {
     var items = [];
-    // Tasks mit needs_input
+    var coveredAgents = {};
     tasks.forEach(function (t) {
       if (t.status === 'needs_input') {
+        coveredAgents[t.agentId] = true;
         items.push({ kind: 'task', task: t, agent: findAgent(agents, t.agentId) });
       }
     });
-    // Agenten mit needs_input, die nicht schon ueber einen Task abgedeckt sind
-    var coveredAgents = {};
-    tasks.forEach(function (t) { if (t.status === 'needs_input') coveredAgents[t.agentId] = true; });
     agents.forEach(function (a) {
       if (a.status === 'needs_input' && !coveredAgents[a.id]) {
         items.push({ kind: 'agent', agent: a });
       }
     });
+    return items;
+  }
+
+  function renderInput(items) {
+    var section = el('section-input');
+    var list = el('input-list');
+    clear(list);
 
     if (items.length === 0) { section.hidden = true; return; }
     section.hidden = false;
+    el('input-count-badge').textContent = items.length + ' offen';
 
     items.forEach(function (it) {
       if (it.kind === 'task') list.appendChild(inputTaskCard(it.task, it.agent));
@@ -792,24 +1072,11 @@ export const APPJS = `'use strict';
     });
   }
 
-  function inputTaskCard(task, agent) {
-    var card = make('div', 'card');
-    var head = make('div', 'card-head');
-    var titleWrap = make('div');
-    titleWrap.appendChild(make('p', 'card-title', task.title || 'Aufgabe'));
-    var meta = make('p', 'card-meta', (agent ? agent.name : 'Agent') + ' · ' + relTime(task.updatedAt || task.createdAt));
-    titleWrap.appendChild(meta);
-    head.appendChild(titleWrap);
-    head.appendChild(statusBadge(task.status));
-    card.appendChild(head);
-
-    if (task.question) {
-      card.appendChild(make('p', 'card-question', task.question));
-    }
-
+  // Kleiner Helfer: Antwort-Zeile (Textarea + Senden) fuer Input-Kacheln.
+  function replyBlock(placeholder, sendFn) {
     var ta = make('textarea', 'textarea');
     ta.rows = 2;
-    ta.placeholder = 'Deine Antwort…';
+    ta.placeholder = placeholder;
     var row = make('div', 'reply-row');
     row.appendChild(ta);
     var actions = make('div', 'card-actions');
@@ -819,55 +1086,46 @@ export const APPJS = `'use strict';
       var text = ta.value.trim();
       if (!text) { ta.focus(); return; }
       btn.disabled = true;
-      api('taskInput', { taskId: task.id, text: text }).then(function (r) {
-        if (r && r.ok) { ta.value = ''; showToast('Antwort gesendet'); refresh(); }
-        else { showToast('Konnte nicht senden', true); btn.disabled = false; }
-      }).catch(function () { showToast('Netzwerkfehler', true); btn.disabled = false; });
+      sendFn(text, function (ok) {
+        if (ok) { ta.value = ''; }
+        btn.disabled = false;
+      });
     });
     actions.appendChild(btn);
     row.appendChild(actions);
-    card.appendChild(row);
+    return row;
+  }
+
+  function inputTaskCard(task, agent) {
+    var card = make('div', 'io-card');
+    card.appendChild(make('div', 'io-eyebrow', 'INPUT NÖTIG · ' + (agent ? agent.name : 'Agent')));
+    card.appendChild(make('div', 'io-title', task.title || 'Aufgabe'));
+    if (task.question) card.appendChild(make('div', 'io-question', task.question));
+    card.appendChild(make('div', 'io-meta', relTime(task.updatedAt || task.createdAt)));
+    card.appendChild(replyBlock('Deine Antwort…', function (text, done) {
+      api('taskInput', { taskId: task.id, text: text }).then(function (r) {
+        if (r && r.ok) { showToast('Antwort gesendet'); done(true); refresh(); }
+        else { showToast('Konnte nicht senden', true); done(false); }
+      }).catch(function () { showToast('Netzwerkfehler', true); done(false); });
+    }));
     return card;
   }
 
   function inputAgentCard(agent) {
-    var card = make('div', 'card');
-    var head = make('div', 'card-head');
-    var titleWrap = make('div');
-    titleWrap.appendChild(make('p', 'card-title', agent.name || 'Agent'));
-    titleWrap.appendChild(make('p', 'card-meta', 'Wartet auf Eingabe · ' + relTime(agent.lastSeen)));
-    head.appendChild(titleWrap);
-    head.appendChild(statusBadge(agent.status));
-    card.appendChild(head);
-
-    if (agent.currentTask) {
-      card.appendChild(make('p', 'card-question', agent.currentTask));
-    }
-
-    var ta = make('textarea', 'textarea');
-    ta.rows = 2;
-    ta.placeholder = 'Nachricht an ' + (agent.name || 'Agent') + '…';
-    var row = make('div', 'reply-row');
-    row.appendChild(ta);
-    var actions = make('div', 'card-actions');
-    var btn = make('button', 'btn btn-primary', 'Senden');
-    btn.type = 'button';
-    btn.addEventListener('click', function () {
-      var text = ta.value.trim();
-      if (!text) { ta.focus(); return; }
-      btn.disabled = true;
+    var card = make('div', 'io-card');
+    card.appendChild(make('div', 'io-eyebrow', 'INPUT NÖTIG · ' + (agent.name || 'Agent')));
+    card.appendChild(make('div', 'io-title', agent.currentTask || 'Wartet auf Eingabe'));
+    card.appendChild(make('div', 'io-meta', relTime(agent.lastSeen)));
+    card.appendChild(replyBlock('Nachricht an ' + (agent.name || 'Agent') + '…', function (text, done) {
       api('agentMessage', { agentId: agent.id, text: text }).then(function (r) {
-        if (r && r.ok) { ta.value = ''; showToast('Nachricht gesendet'); refresh(); }
-        else { showToast('Konnte nicht senden', true); btn.disabled = false; }
-      }).catch(function () { showToast('Netzwerkfehler', true); btn.disabled = false; });
-    });
-    actions.appendChild(btn);
-    row.appendChild(actions);
-    card.appendChild(row);
+        if (r && r.ok) { showToast('Nachricht gesendet'); done(true); refresh(); }
+        else { showToast('Konnte nicht senden', true); done(false); }
+      }).catch(function () { showToast('Netzwerkfehler', true); done(false); });
+    }));
     return card;
   }
 
-  // ===================== Render: Aktive Aufgaben =====================
+  // ===================== Aktive / Erledigte Aufgaben =====================
   function renderActive(tasks, agents) {
     var list = el('active-list');
     clear(list);
@@ -881,7 +1139,6 @@ export const APPJS = `'use strict';
     });
   }
 
-  // ===================== Render: Erledigt =====================
   function renderDone(tasks, agents) {
     var list = el('done-list');
     var done = tasks.filter(function (t) { return t.status === 'done' || t.status === 'error'; });
@@ -897,48 +1154,36 @@ export const APPJS = `'use strict';
     list.hidden = !doneOpen;
   }
 
-  // Gemeinsame Task-Karte. deletable=true => Loeschen-Button (Erledigt).
+  // Task-Karte. Kopf ist antippbar und oeffnet den Slide-over (Verlauf/Timeline).
+  // deletable=true => Loeschen-Button (Erledigt).
   function taskCard(task, agent, deletable) {
     var card = make('div', 'card');
-    var head = make('div', 'card-head');
+
+    var head = make('div', 'card-head card-open');
+    head.setAttribute('role', 'button');
+    head.tabIndex = 0;
     var titleWrap = make('div');
-    titleWrap.appendChild(make('p', 'card-title', task.title || 'Aufgabe'));
-    var metaText = (agent ? agent.name : 'Agent') + ' · ' + relTime(task.updatedAt || task.createdAt);
-    titleWrap.appendChild(make('p', 'card-meta', metaText));
+    var titleRow = make('div', 'card-title-row');
+    titleRow.appendChild(make('span', 'card-title', task.title || 'Aufgabe'));
+    titleRow.appendChild(make('span', 'open-chevron', '›'));
+    titleWrap.appendChild(titleRow);
+    var log = Array.isArray(task.log) ? task.log : [];
+    var metaText = (agent ? agent.name : 'Agent') + ' · ' + relTime(task.updatedAt || task.createdAt) +
+                   ' · ' + log.length + ' Einträge';
+    titleWrap.appendChild(make('div', 'card-meta', metaText));
     head.appendChild(titleWrap);
-    head.appendChild(statusBadge(task.status));
+    head.appendChild(statusPill(task.status));
+    head.addEventListener('click', function () { openTaskDetail(task, agent); });
+    head.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openTaskDetail(task, agent); }
+    });
     card.appendChild(head);
 
-    // Detail (Log) — antippbar
-    var log = Array.isArray(task.log) ? task.log : [];
-    var toggle = make('button', 'detail-toggle', null);
-    toggle.type = 'button';
-    var isOpen = !!expandedTasks[task.id];
-    toggle.textContent = (isOpen ? '▾ Verlauf ausblenden' : '▸ Verlauf anzeigen') + ' (' + log.length + ')';
-    var logBox = make('div', 'log');
-    logBox.hidden = !isOpen;
-    toggle.addEventListener('click', function () {
-      expandedTasks[task.id] = !expandedTasks[task.id];
-      var nowOpen = !!expandedTasks[task.id];
-      logBox.hidden = !nowOpen;
-      toggle.textContent = (nowOpen ? '▾ Verlauf ausblenden' : '▸ Verlauf anzeigen') + ' (' + log.length + ')';
-    });
-    card.appendChild(toggle);
-
-    log.forEach(function (entry) {
-      var e = make('div', 'log-entry');
-      e.appendChild(make('span', 'log-who', entry.who || '—'));
-      var body = make('div', 'log-body');
-      body.appendChild(make('div', 'log-text', entry.text || ''));
-      body.appendChild(make('div', 'log-ts', absTime(entry.ts)));
-      e.appendChild(body);
-      logBox.appendChild(e);
-    });
-    card.appendChild(logBox);
+    if (task.question) card.appendChild(make('div', 'card-question', task.question));
 
     if (deletable) {
       var actions = make('div', 'card-actions');
-      var del = make('button', 'btn btn-danger', 'Löschen');
+      var del = make('button', 'btn btn-danger btn-sm', 'Löschen');
       del.type = 'button';
       del.addEventListener('click', function () {
         del.disabled = true;
@@ -953,7 +1198,7 @@ export const APPJS = `'use strict';
     return card;
   }
 
-  // ===================== Render: Agenten =====================
+  // ===================== Agenten ("Meine Claudes") =====================
   function renderAgents(agents) {
     var list = el('agents-list');
     clear(list);
@@ -966,14 +1211,20 @@ export const APPJS = `'use strict';
 
   function agentCard(agent) {
     var card = make('div', 'card');
-    var head = make('div', 'card-head');
 
+    var head = make('div', 'card-head card-open');
+    head.setAttribute('role', 'button');
+    head.tabIndex = 0;
     var left = make('div', 'agent-head');
-    var dot = make('span', 'dot ' + (agent.online ? 'dot-online' : 'dot-offline'));
-    left.appendChild(dot);
+    left.appendChild(make('span', 'dot ' + (agent.online ? 'dot-online' : 'dot-offline')));
     left.appendChild(make('span', 'agent-name', agent.name || 'Agent'));
+    left.appendChild(make('span', 'open-chevron', '›'));
     head.appendChild(left);
-    head.appendChild(statusBadge(agent.status));
+    head.appendChild(statusPill(agent.status));
+    head.addEventListener('click', function () { openAgentDetail(agent); });
+    head.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openAgentDetail(agent); }
+    });
     card.appendChild(head);
 
     var body = make('div', 'card-body');
@@ -990,27 +1241,13 @@ export const APPJS = `'use strict';
       card.appendChild(chips);
     }
 
-    // Befehl senden
-    var ta = make('textarea', 'textarea');
-    ta.rows = 2;
-    ta.placeholder = 'Befehl senden…';
-    var row = make('div', 'reply-row');
-    row.appendChild(ta);
-    var actions = make('div', 'card-actions');
-    var btn = make('button', 'btn btn-primary', 'Befehl senden');
-    btn.type = 'button';
-    btn.addEventListener('click', function () {
-      var text = ta.value.trim();
-      if (!text) { ta.focus(); return; }
-      btn.disabled = true;
+    // Befehl senden (bleibt inline)
+    card.appendChild(replyBlock('Befehl senden…', function (text, done) {
       api('agentMessage', { agentId: agent.id, text: text }).then(function (r) {
-        if (r && r.ok) { ta.value = ''; showToast('Befehl gesendet'); refresh(); }
-        else { showToast('Konnte nicht senden', true); btn.disabled = false; }
-      }).catch(function () { showToast('Netzwerkfehler', true); btn.disabled = false; });
-    });
-    actions.appendChild(btn);
-    row.appendChild(actions);
-    card.appendChild(row);
+        if (r && r.ok) { showToast('Befehl gesendet'); done(true); refresh(); }
+        else { showToast('Konnte nicht senden', true); done(false); }
+      }).catch(function () { showToast('Netzwerkfehler', true); done(false); });
+    }));
     return card;
   }
 
@@ -1021,7 +1258,219 @@ export const APPJS = `'use strict';
     return row;
   }
 
-  // ===================== Render: Coworker-Formular =====================
+  // ===================== Chats & Sessions je Quelle =====================
+  function renderSessions(sessions) {
+    var wrap = el('sessions-list');
+    clear(wrap);
+    if (!sessions || !sessions.length) {
+      wrap.appendChild(make('div', 'empty-note',
+        'Noch keine Chats gemeldet — die Brücke sammelt sie beim nächsten Lauf.'));
+      return;
+    }
+    sessions.forEach(function (src) { wrap.appendChild(sourceBlock(src)); });
+  }
+
+  function byLastActivityDesc(a, b) {
+    return (b.lastActivity || 0) - (a.lastActivity || 0);
+  }
+
+  function sourceBlock(src) {
+    var block = make('div', 'source-block');
+
+    var head = make('div', 'source-head');
+    head.appendChild(make('span', 'dot ' + (src.online ? 'dot-online' : 'dot-offline')));
+    var titleWrap = make('div', 'source-title-wrap');
+    titleWrap.appendChild(make('span', 'source-title', src.name || 'Quelle'));
+    var metaBits = [];
+    if (src.model) metaBits.push(src.model);
+    if (src.updatedAt) metaBits.push(relTime(src.updatedAt));
+    if (metaBits.length) titleWrap.appendChild(make('span', 'source-model', metaBits.join(' · ')));
+    head.appendChild(titleWrap);
+    block.appendChild(head);
+
+    var items = Array.isArray(src.items) ? src.items : [];
+    var code = items.filter(function (it) { return it.kind === 'code'; }).sort(byLastActivityDesc);
+    var cowork = items.filter(function (it) { return it.kind !== 'code'; });
+    var pinned = cowork.filter(function (it) { return it.pinned; }).sort(byLastActivityDesc);
+    var openItems = cowork.filter(function (it) { return !it.pinned && it.status !== 'done'; }).sort(byLastActivityDesc);
+    var doneItems = cowork.filter(function (it) { return !it.pinned && it.status === 'done'; }).sort(byLastActivityDesc);
+
+    var srcKey = (src.agentId || '') + '|' + (src.source || src.name || '');
+
+    var groups = make('div', 'sess-groups');
+    var g;
+    g = sessGroup('📌', 'Angeheftet', pinned, null); if (g) groups.appendChild(g);
+    g = sessGroup('🟢', 'Offen', openItems, null); if (g) groups.appendChild(g);
+    g = sessGroup('✅', 'Erledigt', doneItems, { collapsible: true, stateKey: srcKey }); if (g) groups.appendChild(g);
+    g = sessGroup('🧑‍💻', 'Claude Code', code, null); if (g) groups.appendChild(g);
+    if (!groups.firstChild) groups.appendChild(make('div', 'empty-note', 'Keine Einträge.'));
+    block.appendChild(groups);
+    return block;
+  }
+
+  // Untergruppe. opts.collapsible => einklappbar (Zustand in sessOpen[stateKey]).
+  function sessGroup(emoji, label, items, opts) {
+    if (!items.length) return null;
+    opts = opts || {};
+    var g = make('div', 'sess-group');
+    var count = make('span', 'sess-count', String(items.length));
+    var list = make('div', 'sess-list');
+    items.forEach(function (it) { list.appendChild(sessRow(it)); });
+
+    var head;
+    if (opts.collapsible) {
+      var isOpen = !!sessOpen[opts.stateKey];
+      head = make('button', 'sess-group-head sess-collapse');
+      head.type = 'button';
+      head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      head.appendChild(make('span', 'chevron', '▸'));
+      head.appendChild(make('span', 'sess-group-title', emoji + ' ' + label));
+      head.appendChild(count);
+      list.hidden = !isOpen;
+      head.addEventListener('click', function () {
+        sessOpen[opts.stateKey] = !sessOpen[opts.stateKey];
+        var no = !!sessOpen[opts.stateKey];
+        head.setAttribute('aria-expanded', no ? 'true' : 'false');
+        list.hidden = !no;
+      });
+    } else {
+      head = make('div', 'sess-group-head');
+      head.appendChild(make('span', 'sess-group-title', emoji + ' ' + label));
+      head.appendChild(count);
+    }
+    g.appendChild(head);
+    g.appendChild(list);
+    return g;
+  }
+
+  function sessRow(it) {
+    var row = make('div', 'sess-row');
+    var main = make('div', 'sess-row-main');
+    main.appendChild(make('span', 'sess-title', it.title || '(ohne Titel)'));
+    main.appendChild(make('span', 'sess-time', relTime(it.lastActivity)));
+    row.appendChild(main);
+    if (it.project) row.appendChild(make('div', 'sess-project', it.project));
+    return row;
+  }
+
+  // ===================== Slide-over (Detail-Ansicht) =====================
+  function openSlideover() {
+    el('slideover').hidden = false;
+    document.body.classList.add('no-scroll');
+  }
+  function closeSlideover() {
+    el('slideover').hidden = true;
+    document.body.classList.remove('no-scroll');
+  }
+
+  // "Letzte Aktivität"-Timeline aus [{text, who, when}].
+  function timelineSection(title, entries) {
+    var wrap = make('div', 'so-section');
+    wrap.appendChild(make('div', 'so-section-title eyebrow', title));
+    if (!entries.length) {
+      wrap.appendChild(make('div', 'so-empty', 'Noch keine Aktivität.'));
+      return wrap;
+    }
+    var tl = make('div', 'timeline');
+    entries.forEach(function (e) {
+      var item = make('div', 'tl-item');
+      item.appendChild(make('span', 'tl-dot'));
+      var b = make('div', 'tl-body');
+      b.appendChild(make('div', 'tl-text', e.text || ''));
+      var meta = [];
+      if (e.who) meta.push(e.who);
+      if (e.when) meta.push(e.when);
+      if (meta.length) b.appendChild(make('div', 'tl-when', meta.join(' · ')));
+      item.appendChild(b);
+      tl.appendChild(item);
+    });
+    wrap.appendChild(tl);
+    return wrap;
+  }
+
+  function mutedPill(label) { return make('span', 'pill pill-muted', label); }
+
+  function openTaskDetail(task, agent) {
+    el('so-eyebrow').textContent = agent ? (agent.name || 'Agent') : 'Aufgabe';
+    el('so-title').textContent = task.title || 'Aufgabe';
+
+    var pills = el('so-pills');
+    clear(pills);
+    pills.appendChild(statusPill(task.status));
+    var rel = relTime(task.updatedAt || task.createdAt);
+    if (rel) pills.appendChild(mutedPill('🕘 ' + rel));
+
+    var body = el('so-body');
+    clear(body);
+    if (task.question) {
+      var q = make('div', 'so-section');
+      q.appendChild(make('div', 'so-section-title eyebrow', 'Frage'));
+      q.appendChild(make('p', 'so-text', task.question));
+      body.appendChild(q);
+    }
+    var log = Array.isArray(task.log) ? task.log.slice() : [];
+    log.reverse(); // neueste zuerst
+    var entries = log.map(function (e) {
+      return { text: e.text || '', who: e.who || '', when: absTime(e.ts) };
+    });
+    body.appendChild(timelineSection('Letzte Aktivität', entries));
+    openSlideover();
+  }
+
+  function openAgentDetail(agent) {
+    el('so-eyebrow').textContent = agent.host || 'Agent';
+    el('so-title').textContent = agent.name || 'Agent';
+
+    var pills = el('so-pills');
+    clear(pills);
+    var onlinePill = make('span', 'pill ' + (agent.online ? 'pill-ok' : 'pill-muted'));
+    onlinePill.appendChild(make('span', 'pill-dot'));
+    onlinePill.appendChild(document.createTextNode(agent.online ? 'online' : 'offline'));
+    pills.appendChild(onlinePill);
+    pills.appendChild(statusPill(agent.status));
+    if (agent.model) pills.appendChild(mutedPill(agent.model));
+
+    var body = el('so-body');
+    clear(body);
+
+    var info = make('div', 'so-section');
+    info.appendChild(make('div', 'so-section-title eyebrow', 'Überblick'));
+    info.appendChild(kv('Host', agent.host || '—'));
+    info.appendChild(kv('Modell', agent.model || '—'));
+    if (agent.currentTask) info.appendChild(kv('Aufgabe', agent.currentTask));
+    info.appendChild(kv('Gesehen', relTime(agent.lastSeen) || '—'));
+    body.appendChild(info);
+
+    var caps = Array.isArray(agent.capabilities) ? agent.capabilities : [];
+    if (caps.length) {
+      var capSec = make('div', 'so-section');
+      capSec.appendChild(make('div', 'so-section-title eyebrow', 'Fähigkeiten'));
+      var chips = make('div', 'chips');
+      caps.forEach(function (c) { chips.appendChild(make('span', 'chip', c)); });
+      capSec.appendChild(chips);
+      body.appendChild(capSec);
+    }
+
+    // "Letzte Aktivität" = Logs aller Aufgaben dieses Agenten, neueste zuerst.
+    var acts = [];
+    lastState.tasks.forEach(function (t) {
+      if (t.agentId === agent.id && Array.isArray(t.log)) {
+        t.log.forEach(function (e) {
+          acts.push({ text: e.text || '', who: e.who || '', ts: e.ts });
+        });
+      }
+    });
+    acts.sort(function (a, b) {
+      return (new Date(b.ts).getTime() || 0) - (new Date(a.ts).getTime() || 0);
+    });
+    var entries = acts.slice(0, 25).map(function (e) {
+      return { text: e.text, who: e.who, when: absTime(e.ts) };
+    });
+    body.appendChild(timelineSection('Letzte Aktivität', entries));
+    openSlideover();
+  }
+
+  // ===================== Coworker-Formular =====================
   function renderCoworkers(coworkers, agents) {
     var sel = el('cw-coworker');
     var actionSel = el('cw-action');
@@ -1062,15 +1511,14 @@ export const APPJS = `'use strict';
         actionSel.appendChild(o);
       } else {
         acts.forEach(function (a) {
-          var o = make('option', null, a);
-          o.value = a;
-          actionSel.appendChild(o);
+          var oo = make('option', null, a);
+          oo.value = a;
+          actionSel.appendChild(oo);
         });
         if (prevAction) actionSel.value = prevAction;
       }
     }
     fillActions();
-    // Aktionen bei Coworker-Wechsel neu befuellen (Handler einmalig setzen)
     sel.onchange = function () { prevAction = ''; fillActions(); };
 
     // Ziel-Agent-Dropdown
@@ -1129,7 +1577,7 @@ export const APPJS = `'use strict';
     }).then(function () { btn.disabled = false; });
   }
 
-  // ===================== Render: Feed =====================
+  // ===================== Feed =====================
   function feedIcon(kind) {
     switch (kind) {
       case 'system': return '⚙️';
@@ -1146,11 +1594,9 @@ export const APPJS = `'use strict';
     var list = el('feed-list');
     clear(list);
     if (!messages.length) {
-      var li = make('li', 'empty', 'Noch keine Aktivität.');
-      list.appendChild(li);
+      list.appendChild(make('li', 'empty', 'Noch keine Aktivität.'));
       return;
     }
-    // Neueste zuerst (bereits so geliefert); auf 60 begrenzen
     messages.slice(0, 60).forEach(function (m) {
       var li = make('li', 'feed-item');
       li.appendChild(make('span', 'feed-icon', feedIcon(m.kind)));
@@ -1162,7 +1608,7 @@ export const APPJS = `'use strict';
     });
   }
 
-  // ===================== gemeinsame Helfer =====================
+  // ===================== Gemeinsame Helfer =====================
   function findAgent(agents, id) {
     for (var i = 0; i < agents.length; i++) { if (agents[i].id === id) return agents[i]; }
     return null;
@@ -1177,17 +1623,34 @@ export const APPJS = `'use strict';
       case 'error': return 'Fehler';
       case 'idle': return 'bereit';
       case 'offline': return 'offline';
+      case 'active': return 'aktiv';
       default: return status || '—';
     }
   }
 
-  function statusBadge(status) {
-    var b = make('span', 'badge badge-' + (status || 'idle'), statusLabel(status));
-    return b;
+  function pillClass(status) {
+    switch (status) {
+      case 'working':
+      case 'active': return 'pill-ok';
+      case 'open': return 'pill-info';
+      case 'needs_input': return 'pill-warn';
+      case 'error': return 'pill-err';
+      case 'done':
+      case 'idle':
+      case 'offline':
+      default: return 'pill-muted';
+    }
+  }
+
+  // Status-Pill mit farbigem Punkt (wie die Projektkarten der Vorlage).
+  function statusPill(status) {
+    var p = make('span', 'pill ' + pillClass(status));
+    p.appendChild(make('span', 'pill-dot'));
+    p.appendChild(document.createTextNode(statusLabel(status)));
+    return p;
   }
 
   // ===================== Gemeinsames Gedächtnis =====================
-  // Meta-Zeile "Version X · zuletzt geändert von Y · vor Z" aktualisieren.
   function setMemMeta(mem) {
     var meta = el('mem-meta');
     if (!mem) { meta.textContent = 'Noch kein Text gespeichert.'; return; }
@@ -1225,7 +1688,7 @@ export const APPJS = `'use strict';
     api('setMemory', { text: ta.value }).then(function (r) {
       if (r && r.ok) {
         memLoadedVersion = (r.version != null) ? r.version : memLoadedVersion;
-        el('mem-newer').hidden = true; // eigene Version ist jetzt die neueste
+        el('mem-newer').hidden = true;
         setMemMeta({ version: r.version, updatedBy: 'dir', updatedAt: new Date().toISOString() });
         showToast('Gespeichert (v' + (r.version != null ? r.version : '?') + ') – alle Claudes werden synchronisiert');
       } else {
@@ -1237,13 +1700,12 @@ export const APPJS = `'use strict';
   }
 
   // Vom Auto-Refresh aufgerufen: nur dezent auf eine neuere Server-Version
-  // hinweisen — die Textarea NICHT anfassen. Erwartet die serverseitige
-  // Version aus dem state (falls geliefert).
+  // hinweisen — die Textarea NICHT anfassen.
   function noteMemoryVersion(serverVersion) {
     if (!memLoaded || serverVersion == null || memLoadedVersion == null) return;
     var badge = el('mem-newer');
     if (serverVersion > memLoadedVersion) {
-      badge.textContent = 'Neuere Version v' + serverVersion + ' verfügbar – neu laden';
+      badge.textContent = 'Neuere Version v' + serverVersion + ' – neu laden';
       badge.hidden = false;
     } else {
       badge.hidden = true;
@@ -1252,14 +1714,17 @@ export const APPJS = `'use strict';
 
   // ===================== Haupt-Render =====================
   function render(state) {
-    renderInput(state.tasks, state.agents);
+    updateHeaderTime();
+    var inputs = collectInputs(state.tasks, state.agents);
+    updateHeaderStats(state, inputs.length);
+    renderInput(inputs);
     renderActive(state.tasks, state.agents);
     renderDone(state.tasks, state.agents);
     renderAgents(state.agents);
+    renderSessions(state.sessions);
     renderCoworkers(state.coworkers, state.agents);
     renderFeed(state.messages);
-    // Textarea in Ruhe lassen — nur den Hinweis auf neuere Version pflegen,
-    // falls der state eine Memory-Version mitliefert.
+    // Textarea in Ruhe lassen — nur den Hinweis auf neuere Version pflegen.
     if (state.memory && typeof state.memory === 'object') {
       noteMemoryVersion(state.memory.version);
     } else if (typeof state.memoryVersion !== 'undefined') {
@@ -1306,6 +1771,13 @@ export const APPJS = `'use strict';
     });
     el('mem-reload').addEventListener('click', function () { loadMemory(true); });
     el('mem-save').addEventListener('click', saveMemory);
+
+    // Slide-over schliessen (Backdrop, X-Button, Escape)
+    el('so-backdrop').addEventListener('click', closeSlideover);
+    el('so-close').addEventListener('click', closeSlideover);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && !el('slideover').hidden) closeSlideover();
+    });
 
     // Sofort refreshen bei Fenster-Fokus / Sichtbarkeit
     window.addEventListener('focus', function () { if (token) refresh(); });
