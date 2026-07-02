@@ -637,6 +637,33 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
 
 /* ---------- Chats & Sessions ---------- */
 .sessions-list { display: flex; flex-direction: column; gap: 16px; }
+
+/* Cowork-Projekte-Übersicht (ganz oben) */
+.cowork-overview {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+.cowork-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.cowork-title { font-size: 14px; font-weight: 600; }
+.cowork-list { display: flex; flex-direction: column; gap: 6px; }
+.cowork-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+}
+.cowork-name { font-size: 13.5px; font-weight: 600; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cowork-meta { display: flex; align-items: baseline; gap: 10px; flex: 0 0 auto; }
+.cowork-count { font-size: 11.5px; color: var(--muted); }
+.cowork-date { font-size: 12px; font-weight: 600; color: var(--text-3); white-space: nowrap; }
+
 .source-block {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -648,7 +675,7 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
 .source-title-wrap { display: flex; flex-direction: column; min-width: 0; }
 .source-title { font-size: 15px; font-weight: 600; line-height: 1.2; }
 .source-model { font-size: 12px; color: var(--muted); margin-top: 1px; }
-.sess-groups { display: flex; flex-direction: column; gap: 12px; }
+.sess-groups { display: flex; flex-direction: column; gap: 14px; }
 .sess-group { display: flex; flex-direction: column; }
 .sess-group-head {
   display: flex;
@@ -674,6 +701,22 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   border-radius: var(--radius-pill);
   padding: 1px 8px;
 }
+
+/* Projekt-Untergruppen (Kategorien) innerhalb einer Quelle */
+.sess-proj-groups { display: flex; flex-direction: column; gap: 12px; }
+.sess-proj-group { display: flex; flex-direction: column; }
+.sess-proj-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 0 7px; }
+.sess-proj-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sess-proj-date { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
 .sess-list { display: flex; flex-direction: column; gap: 6px; }
 .sess-row {
   padding: 9px 11px;
@@ -681,7 +724,8 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   background: var(--surface-3);
   border: 1px solid var(--border-soft);
 }
-.sess-row-main { display: flex; align-items: baseline; gap: 10px; }
+.sess-row-main { display: flex; align-items: baseline; gap: 8px; }
+.sess-code { flex: 0 0 auto; font-size: 13px; line-height: 1; }
 .sess-title {
   flex: 1;
   min-width: 0;
@@ -691,8 +735,22 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sess-time { flex: 0 0 auto; font-size: 11.5px; color: var(--muted-2); white-space: nowrap; }
-.sess-project { font-size: 11.5px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+.sess-date { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--text-3); white-space: nowrap; }
+.sess-sub { display: flex; align-items: center; gap: 8px; margin-top: 3px; flex-wrap: wrap; }
+.sess-rel { font-size: 11px; color: var(--muted-2); white-space: nowrap; }
+.sess-proj-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ---------- Slide-over ---------- */
 .slideover { position: fixed; inset: 0; z-index: 60; }
@@ -875,6 +933,26 @@ export const APPJS = `'use strict';
       return new Date(ts).toLocaleString('de-DE', {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
       });
+    } catch (e) { return ''; }
+  }
+
+  // Datum des letzten Chats: "Heute HH:MM", "Gestern", sonst "TT.MM.YYYY".
+  function fmtDate(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    var now = new Date(serverNow());
+    var sameDay = d.getFullYear() === now.getFullYear() &&
+                  d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (sameDay) {
+      var hh = d.getHours(), mm = d.getMinutes();
+      return 'Heute ' + (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+    }
+    var y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() &&
+        d.getDate() === y.getDate()) return 'Gestern';
+    try {
+      return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     } catch (e) { return ''; }
   }
 
@@ -1259,9 +1337,31 @@ export const APPJS = `'use strict';
   }
 
   // ===================== Chats & Sessions je Quelle =====================
+  function byLastActivityDesc(a, b) {
+    return (b.lastActivity || 0) - (a.lastActivity || 0);
+  }
+
+  // Distinct-Projekte aus einer Item-Liste: [{project, count, newest}] nach Datum sortiert.
+  // fallbackLabel = Bezeichnung fuer Items ohne project (z.B. "Sonstige").
+  function projectStats(items, fallbackLabel) {
+    var map = {};
+    items.forEach(function (it) {
+      var key = it.project || '__none__';
+      if (!map[key]) map[key] = { project: it.project || fallbackLabel, items: [], newest: 0 };
+      map[key].items.push(it);
+      if ((it.lastActivity || 0) > map[key].newest) map[key].newest = it.lastActivity || 0;
+    });
+    var arr = Object.keys(map).map(function (k) { return map[k]; });
+    arr.forEach(function (grp) { grp.items.sort(byLastActivityDesc); });
+    arr.sort(function (a, b) { return b.newest - a.newest; });
+    return arr;
+  }
+
   function renderSessions(sessions) {
     var wrap = el('sessions-list');
     clear(wrap);
+    // Cowork-Projekte-Übersicht immer zuerst (zeigt auch den Leer-Hinweis).
+    wrap.appendChild(coworkOverview(sessions || []));
     if (!sessions || !sessions.length) {
       wrap.appendChild(make('div', 'empty-note',
         'Noch keine Chats gemeldet — die Brücke sammelt sie beim nächsten Lauf.'));
@@ -1270,8 +1370,37 @@ export const APPJS = `'use strict';
     sessions.forEach(function (src) { wrap.appendChild(sourceBlock(src)); });
   }
 
-  function byLastActivityDesc(a, b) {
-    return (b.lastActivity || 0) - (a.lastActivity || 0);
+  // Kompakte Übersicht aller distinct Cowork-Projekte (kind=="cowork") über alle Quellen.
+  function coworkOverview(sessions) {
+    var coworkItems = [];
+    sessions.forEach(function (src) {
+      (Array.isArray(src.items) ? src.items : []).forEach(function (it) {
+        if (it.kind === 'cowork') coworkItems.push(it);
+      });
+    });
+    var card = make('div', 'cowork-overview');
+    var head = make('div', 'cowork-head');
+    head.appendChild(make('span', 'cowork-title', '🗂 Cowork-Projekte'));
+    card.appendChild(head);
+
+    var stats = projectStats(coworkItems, 'Sonstige');
+    if (!stats.length) {
+      card.appendChild(make('div', 'empty-note',
+        'Cowork-Projekte erscheinen, sobald die Brücke sie lokal findet.'));
+      return card;
+    }
+    var list = make('div', 'cowork-list');
+    stats.forEach(function (p) {
+      var row = make('div', 'cowork-row');
+      row.appendChild(make('span', 'cowork-name', p.project));
+      var meta = make('span', 'cowork-meta');
+      meta.appendChild(make('span', 'cowork-count', p.items.length + (p.items.length === 1 ? ' Chat' : ' Chats')));
+      meta.appendChild(make('span', 'cowork-date', fmtDate(p.newest)));
+      row.appendChild(meta);
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
   }
 
   function sourceBlock(src) {
@@ -1289,33 +1418,60 @@ export const APPJS = `'use strict';
     block.appendChild(head);
 
     var items = Array.isArray(src.items) ? src.items : [];
-    var code = items.filter(function (it) { return it.kind === 'code'; }).sort(byLastActivityDesc);
-    var cowork = items.filter(function (it) { return it.kind !== 'code'; });
-    var pinned = cowork.filter(function (it) { return it.pinned; }).sort(byLastActivityDesc);
-    var openItems = cowork.filter(function (it) { return !it.pinned && it.status !== 'done'; }).sort(byLastActivityDesc);
-    var doneItems = cowork.filter(function (it) { return !it.pinned && it.status === 'done'; }).sort(byLastActivityDesc);
+    // Aufteilung: Angeheftet (projektübergreifend, oben) > Erledigt (einklappbar) > Offen (nach Projekt).
+    var pinned = items.filter(function (it) { return it.pinned; }).sort(byLastActivityDesc);
+    var rest = items.filter(function (it) { return !it.pinned; });
+    var doneItems = rest.filter(function (it) { return it.status === 'done'; }).sort(byLastActivityDesc);
+    var openItems = rest.filter(function (it) { return it.status !== 'done'; });
 
     var srcKey = (src.agentId || '') + '|' + (src.source || src.name || '');
 
     var groups = make('div', 'sess-groups');
-    var g;
-    g = sessGroup('📌', 'Angeheftet', pinned, null); if (g) groups.appendChild(g);
-    g = sessGroup('🟢', 'Offen', openItems, null); if (g) groups.appendChild(g);
-    g = sessGroup('✅', 'Erledigt', doneItems, { collapsible: true, stateKey: srcKey }); if (g) groups.appendChild(g);
-    g = sessGroup('🧑‍💻', 'Claude Code', code, null); if (g) groups.appendChild(g);
+
+    // 📌 Angeheftet — projektübergreifend, mit Projekt-Badge je Zeile.
+    var g = sessGroup('📌', 'Angeheftet', pinned, { showProject: true });
+    if (g) groups.appendChild(g);
+
+    // Offene Chats nach Projekt gruppiert (Projekt = Kategorie), Projekte nach jüngstem Chat.
+    var projGroups = projectStats(openItems, 'Sonstige');
+    if (projGroups.length) {
+      var projWrap = make('div', 'sess-proj-groups');
+      projGroups.forEach(function (p) { projWrap.appendChild(projectSubgroup(p)); });
+      groups.appendChild(projWrap);
+    }
+
+    // ✅ Erledigt — einklappbar, projektübergreifend, mit Projekt-Badge.
+    g = sessGroup('✅', 'Erledigt', doneItems, { collapsible: true, stateKey: srcKey, showProject: true });
+    if (g) groups.appendChild(g);
+
     if (!groups.firstChild) groups.appendChild(make('div', 'empty-note', 'Keine Einträge.'));
     block.appendChild(groups);
     return block;
   }
 
-  // Untergruppe. opts.collapsible => einklappbar (Zustand in sessOpen[stateKey]).
+  // Projekt-Untergruppe: Unterüberschrift (Name + Anzahl + jüngstes Datum) + Zeilen.
+  function projectSubgroup(p) {
+    var wrap = make('div', 'sess-proj-group');
+    var head = make('div', 'sess-proj-head');
+    head.appendChild(make('span', 'sess-proj-name', p.project));
+    head.appendChild(make('span', 'sess-count', String(p.items.length)));
+    head.appendChild(make('span', 'sess-proj-date', fmtDate(p.newest)));
+    wrap.appendChild(head);
+    var list = make('div', 'sess-list');
+    // innerhalb des Projekts nach lastActivity absteigend (bereits vorsortiert)
+    p.items.forEach(function (it) { list.appendChild(sessRow(it, false)); });
+    wrap.appendChild(list);
+    return wrap;
+  }
+
+  // Gruppe (Angeheftet / Erledigt). opts.collapsible => einklappbar; opts.showProject => Projekt-Badge je Zeile.
   function sessGroup(emoji, label, items, opts) {
     if (!items.length) return null;
     opts = opts || {};
     var g = make('div', 'sess-group');
     var count = make('span', 'sess-count', String(items.length));
     var list = make('div', 'sess-list');
-    items.forEach(function (it) { list.appendChild(sessRow(it)); });
+    items.forEach(function (it) { list.appendChild(sessRow(it, !!opts.showProject)); });
 
     var head;
     if (opts.collapsible) {
@@ -1343,13 +1499,27 @@ export const APPJS = `'use strict';
     return g;
   }
 
-  function sessRow(it) {
+  // Chat-Zeile: [🧑‍💻 bei Claude Code] Titel … Datum(fmtDate); darunter relTime + optional Projekt-Badge.
+  function sessRow(it, showProject) {
     var row = make('div', 'sess-row');
     var main = make('div', 'sess-row-main');
+    if (it.kind === 'code') {
+      var mark = make('span', 'sess-code', '🧑‍💻');
+      mark.title = 'Claude Code';
+      main.appendChild(mark);
+    }
     main.appendChild(make('span', 'sess-title', it.title || '(ohne Titel)'));
-    main.appendChild(make('span', 'sess-time', relTime(it.lastActivity)));
+    main.appendChild(make('span', 'sess-date', fmtDate(it.lastActivity)));
     row.appendChild(main);
-    if (it.project) row.appendChild(make('div', 'sess-project', it.project));
+
+    var sub = make('div', 'sess-sub');
+    var rel = relTime(it.lastActivity);
+    if (rel) sub.appendChild(make('span', 'sess-rel', rel));
+    if (showProject) {
+      if (it.project) sub.appendChild(make('span', 'sess-proj-badge', it.project));
+      else if (it.kind === 'code') sub.appendChild(make('span', 'sess-proj-badge', 'Claude Code'));
+    }
+    if (sub.firstChild) row.appendChild(sub);
     return row;
   }
 
