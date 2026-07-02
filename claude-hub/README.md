@@ -399,15 +399,15 @@ welche Sessions offen/erledigt sind.
   letzte Aktivität (Datei-mtime) und Status gemeldet (`open`, wenn jünger als
   24 h, sonst `done`). Es werden nur die **neuesten ~100 Sessions** je Scan
   gemeldet (nach Aktivität sortiert), um Tokens/Last zu sparen.
-- **Claude Cowork (best effort):** Die Bridge prüft mögliche lokale
-  Cowork-Speicherorte (v.a. macOS unter
-  `~/Library/Application Support/Claude/…` sowie `~/.claude/cowork/`). Findet
-  sie dort parsebare Chat-Daten (Felder wie `title`/`pinned`/`status`/
-  `updatedAt`), werden sie als Cowork-Chats gemeldet. Cowork-Chats liegen
-  aber häufig **nur serverseitig im Claude-Konto (Cloud)** – dann findet die
-  Bridge lokal nichts und meldet auch nichts. Sie loggt in diesem Fall
-  **einmalig beim Start** die geprüften Kandidaten-Pfade, damit ein lokaler
-  Speicherort später gezielt nachgetragen werden kann.
+- **Claude Cowork (macOS):** Die Bridge liest die Cowork-Session-Metadaten aus
+  `~/Library/Application Support/Claude/claude-code-sessions/<workspace>/<session>/local_*.json`.
+  Pro Session werden Titel, Projekt (letzter Pfadbestandteil von `cwd`; der
+  Home-Ordner wird als „Allgemein" angezeigt), letzte Aktivität
+  (`lastActivityAt`/`lastFocusedAt`/`createdAt`) und Status
+  (`isArchived` → `done`, sonst `open`) sowie ggf. `pinned` gemeldet. Es werden
+  ebenfalls nur die **neuesten ~100 Sessions** gemeldet. Existiert der Ordner
+  nicht (z.B. Linux/Hetzner), bleibt die Bridge still und meldet keine
+  Cowork-Items.
 
 **Neue Config-Werte** (env oder `~/.claude-hub/config.json`):
 

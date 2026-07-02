@@ -15,7 +15,7 @@ import { createServer } from 'node:http';
 import { spawnSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Konstanten / Pfade
@@ -816,60 +816,72 @@ function scanClaudeCode() {
   return items;
 }
 
-// Best-effort: sucht einen lokalen Claude-Cowork-Chat-Speicher (macOS).
-// Gibt { items, checked, storeFound } zurück.
-function scanClaudeCowork() {
-  const candidates = [
-    join(HOME, 'Library', 'Application Support', 'Claude'),
-    join(HOME, 'Library', 'Application Support', 'Claude', 'Cowork'),
-    join(HOME, 'Library', 'Application Support', 'Claude', 'cowork'),
-    join(HOME, 'Library', 'Application Support', 'Claude', 'Local Storage'),
-    join(HOME, 'Library', 'Application Support', 'Claude', 'IndexedDB'),
-    join(cfg.CLAUDE_HOME, 'cowork'),
-  ];
-  const items = [];
-  const existing = [];
-  for (const dir of candidates) {
-    if (existsSync(dir)) existing.push(dir);
-  }
+// Leitet den Projekt-Kurznamen aus einem cwd ab.
+// Home-Ordner (cwd === HOME oder Basename == Benutzername) → „Allgemein".
+function coworkProjectName(cwd) {
+  const c = String(cwd || '').replace(/\/+$/, '');
+  if (!c) return 'Allgemein';
+  if (c === HOME.replace(/\/+$/, '')) return 'Allgemein';
+  const base = basename(c);
+  if (!base || base === basename(HOME)) return 'Allgemein';
+  return base;
+}
 
-  // In existierenden Kandidaten nach parsebaren Chat-JSON-Dateien suchen.
-  for (const dir of existing) {
-    let entries = [];
-    try { entries = readdirSync(dir); } catch { continue; }
-    for (const name of entries) {
-      if (!name.toLowerCase().endsWith('.json')) continue;
-      const fp = join(dir, name);
-      let fst;
-      try { fst = statSync(fp); } catch { continue; }
-      if (!fst.isFile() || fst.size > 5 * 1024 * 1024) continue;
-      let data;
-      try { data = JSON.parse(readFileSync(fp, 'utf8')); } catch { continue; }
-      // Chats können ein einzelnes Objekt oder ein Array/verschachtelt sein.
-      const chats = Array.isArray(data) ? data
-        : (Array.isArray(data && data.chats) ? data.chats
-          : (data && typeof data === 'object' ? [data] : []));
-      for (const chat of chats) {
-        if (!chat || typeof chat !== 'object') continue;
-        // Nur wenn es wie ein Chat aussieht (title/pinned/status/updatedAt).
-        const looksLikeChat = ('title' in chat) &&
-          (('pinned' in chat) || ('status' in chat) || ('updatedAt' in chat));
-        if (!looksLikeChat) continue;
-        const updated = chat.updatedAt != null ? Number(new Date(chat.updatedAt).getTime() || chat.updatedAt) : fst.mtimeMs;
+// Liest Cowork-Sessions aus den Metadaten-JSONs (macOS):
+//   ~/Library/Application Support/Claude/claude-code-sessions/<workspaceId>/<sessionId>/local_*.json
+// Gibt { items, dirExists } zurück. Auf Linux/Hetzner existiert der Ordner nicht → still.
+function scanCowork() {
+  const base = join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
+  if (!existsSync(base)) return { items: [], dirExists: false };
+
+  const items = [];
+  let workspaces = [];
+  try { workspaces = readdirSync(base); } catch { return { items: [], dirExists: true }; }
+
+  for (const ws of workspaces) {
+    const wsPath = join(base, ws);
+    let wsStat;
+    try { wsStat = statSync(wsPath); } catch { continue; }
+    if (!wsStat.isDirectory()) continue;
+
+    let sessions = [];
+    try { sessions = readdirSync(wsPath); } catch { continue; }
+    for (const sess of sessions) {
+      const sessPath = join(wsPath, sess);
+      let sessStat;
+      try { sessStat = statSync(sessPath); } catch { continue; }
+      if (!sessStat.isDirectory()) continue;
+
+      let files = [];
+      try { files = readdirSync(sessPath); } catch { continue; }
+      for (const f of files) {
+        if (!(f.startsWith('local_') && f.endsWith('.json'))) continue;
+        const fp = join(sessPath, f);
+        let fst;
+        try { fst = statSync(fp); } catch { continue; }
+        if (!fst.isFile()) continue;
+        let json;
+        try { json = JSON.parse(readFileSync(fp, 'utf8')); } catch { continue; }
+        if (!json || typeof json !== 'object') continue;
+
+        const projectName = coworkProjectName(json.cwd);
+        const title = (json.title && String(json.title).trim()) || projectName || 'Cowork-Chat';
+        const lastActivity = json.lastActivityAt || json.lastFocusedAt || json.createdAt || fst.mtimeMs;
         items.push({
-          id: String(chat.id || chat.uuid || name),
+          id: String(json.sessionId || f.slice(0, -'.json'.length)),
           kind: 'cowork',
-          title: truncate(chat.title || '(Cowork-Chat)', 80),
-          status: chat.status === 'done' ? 'done' : 'open',
-          pinned: !!chat.pinned,
-          lastActivity: Math.round(Number.isFinite(updated) ? updated : fst.mtimeMs),
-          project: chat.project ? String(chat.project) : undefined,
+          title: truncate(title, 80),
+          status: json.isArchived ? 'done' : 'open',
+          pinned: !!(json.isPinned || json.pinned || json.isFavorite),
+          lastActivity: Math.round(Number(lastActivity) || fst.mtimeMs),
+          project: projectName,
         });
       }
     }
   }
 
-  return { items, checked: candidates, storeFound: items.length > 0 };
+  items.sort((a, b) => b.lastActivity - a.lastActivity);
+  return { items: items.slice(0, MAX_CODE_SESSIONS), dirExists: true };
 }
 
 let coworkNoticeLogged = false;
@@ -889,14 +901,9 @@ async function runScan() {
 
   if (String(cfg.SCAN_COWORK) !== '0') {
     try {
-      const { items: coworkItems, checked, storeFound } = scanClaudeCowork();
+      const { items: coworkItems } = scanCowork();
       coworkCount = coworkItems.length;
       items = items.concat(coworkItems);
-      if (!storeFound && !coworkNoticeLogged) {
-        coworkNoticeLogged = true;
-        info('Cowork-Chats evtl. nur im Claude-Konto (Cloud) – lokal nichts gefunden. ' +
-          `Geprüft: ${checked.join(', ')}`);
-      }
     } catch (e) { warn(`Cowork-Scan-Fehler: ${e.message}`); }
   }
 
@@ -988,21 +995,18 @@ async function main() {
     `Code ${String(cfg.SCAN_CODE) === '0' ? 'aus' : 'an'} | Cowork ${String(cfg.SCAN_COWORK) === '0' ? 'aus' : 'an'}`);
   try {
     let codeInfo = 0;
-    let coworkStore = false;
     if (String(cfg.SCAN_CODE) !== '0') {
       codeInfo = scanClaudeCode().length;
     }
+    info(`Scanner-Start: ${codeInfo} Claude-Code-Session(s) gefunden.`);
     if (String(cfg.SCAN_COWORK) !== '0') {
-      const cw = scanClaudeCowork();
-      coworkStore = cw.storeFound;
-      if (!cw.storeFound) {
+      const cw = scanCowork();
+      // Nur loggen, wenn der Cowork-Ordner existiert (macOS); sonst still bleiben.
+      if (cw.dirExists && !coworkNoticeLogged) {
         coworkNoticeLogged = true;
-        info('Cowork-Chats evtl. nur im Claude-Konto (Cloud) – lokal nichts gefunden. ' +
-          `Geprüft: ${cw.checked.join(', ')}`);
+        info(`Cowork: ${cw.items.length} Sessions gefunden.`);
       }
     }
-    info(`Scanner-Start: ${codeInfo} Claude-Code-Session(s) gefunden; ` +
-      `Cowork-Store: ${coworkStore ? 'gefunden' : 'keiner'}.`);
   } catch (e) { warn(`Scanner-Startinfo-Fehler: ${e.message}`); }
 
   startControlServer();
