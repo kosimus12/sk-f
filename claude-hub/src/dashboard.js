@@ -140,6 +140,13 @@ export const HTML = `<!doctype html>
           <div id="agents-list" class="card-grid"></div>
         </section>
 
+        <!-- Meine Experten (Personas) -->
+        <section class="section">
+          <h2 class="section-title">🧑‍🚀 Meine Experten</h2>
+          <p class="section-hint">Gib einer Experten-Persona eine Aufgabe — die Antwort erscheint als erledigte Aufgabe.</p>
+          <div id="personas-list" class="card-grid"></div>
+        </section>
+
         <!-- Chats & Sessions je Quelle -->
         <section class="section">
           <h2 class="section-title">💬 Chats &amp; Sessions</h2>
@@ -635,6 +642,10 @@ input:focus, .textarea:focus, .select:focus, .btn:focus-visible {
 .kv .k { color: var(--muted); min-width: 68px; }
 .kv .v { color: var(--text-2); }
 
+/* ---------- Experten (Personas) ---------- */
+.persona-role { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.persona-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+
 /* ---------- Chats & Sessions ---------- */
 .sessions-list { display: flex; flex-direction: column; gap: 16px; }
 
@@ -881,7 +892,7 @@ export const APPJS = `'use strict';
   var serverSkew = 0;      // serverTime - clientTime (fuer relative Zeiten)
   var doneOpen = false;    // "Erledigt"-Sektion aufgeklappt?
   var sessOpen = {};       // srcKey -> true, wenn "Erledigt" einer Quelle offen
-  var lastState = { agents: [], tasks: [], messages: [], coworkers: [], sessions: [] };
+  var lastState = { agents: [], tasks: [], messages: [], coworkers: [], sessions: [], personas: [] };
 
   // Gemeinsames Gedächtnis: bewusst getrennt vom Auto-Refresh, damit die
   // Tipp-Eingabe des Nutzers nicht ueberschrieben wird.
@@ -1066,6 +1077,7 @@ export const APPJS = `'use strict';
         messages: Array.isArray(state.messages) ? state.messages : [],
         coworkers: Array.isArray(state.coworkers) ? state.coworkers : [],
         sessions: Array.isArray(state.sessions) ? state.sessions : [],
+        personas: Array.isArray(state.personas) ? state.personas : [],
         // Falls der state eine Memory-Version mitliefert, durchreichen (optional).
         memory: state.memory,
         memoryVersion: state.memoryVersion
@@ -1334,6 +1346,76 @@ export const APPJS = `'use strict';
     row.appendChild(make('span', 'k', k));
     row.appendChild(make('span', 'v', v));
     return row;
+  }
+
+  // ===================== Experten (Personas) =====================
+  function renderPersonas(personas) {
+    var list = el('personas-list');
+    clear(list);
+    if (!personas || !personas.length) {
+      list.appendChild(make('div', 'empty-note',
+        'Noch keine Experten gemeldet — die Mac-Brücke lädt sie aus ~/.claude-hub/personas/.'));
+      return;
+    }
+    personas.forEach(function (p) { list.appendChild(personaCard(p)); });
+  }
+
+  function personaCard(persona) {
+    var name = persona.name || persona.slug || 'Experte';
+    var card = make('div', 'card');
+
+    // Kopf: Name (fett), darunter Rolle
+    var head = make('div', 'card-head');
+    var titleWrap = make('div');
+    titleWrap.appendChild(make('span', 'agent-name', name));
+    if (persona.role) titleWrap.appendChild(make('div', 'persona-role', persona.role));
+    head.appendChild(titleWrap);
+    card.appendChild(head);
+
+    // Meta: Online-Punkt + Modell als Chip
+    var meta = make('div', 'persona-meta');
+    meta.appendChild(make('span', 'dot ' + (persona.online ? 'dot-online' : 'dot-offline')));
+    if (persona.model) meta.appendChild(make('span', 'chip', persona.model));
+    card.appendChild(meta);
+
+    // Aufgabe an die Persona geben -> runPersona
+    var ta = make('textarea', 'textarea');
+    ta.rows = 2;
+    ta.placeholder = 'Aufgabe an ' + name + '…';
+    var hint = make('p', 'field-error');
+    hint.hidden = true;
+    var row = make('div', 'reply-row');
+    row.appendChild(ta);
+    row.appendChild(hint);
+    var actions = make('div', 'card-actions');
+    var btn = make('button', 'btn btn-primary', 'Aufgabe geben');
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      var task = ta.value.trim();
+      if (!task) {
+        hint.textContent = 'Bitte eine Aufgabe eingeben.';
+        hint.hidden = false;
+        ta.focus();
+        return;
+      }
+      hint.hidden = true;
+      btn.disabled = true;
+      api('runPersona', { slug: persona.slug, task: task }).then(function (r) {
+        if (r && r.ok) {
+          ta.value = '';
+          showToast('An ' + name + ' übergeben — die Antwort erscheint gleich unter „Aufgaben".');
+          refresh();
+        } else {
+          showToast('Konnte Aufgabe nicht übergeben', true);
+        }
+      }).catch(function (e) {
+        if (!e || e.message !== 'unauthorized') showToast('Netzwerkfehler', true);
+      }).then(function () { btn.disabled = false; });
+    });
+    actions.appendChild(btn);
+    row.appendChild(actions);
+    card.appendChild(row);
+    return card;
   }
 
   // ===================== Chats & Sessions je Quelle =====================
@@ -1891,6 +1973,7 @@ export const APPJS = `'use strict';
     renderActive(state.tasks, state.agents);
     renderDone(state.tasks, state.agents);
     renderAgents(state.agents);
+    renderPersonas(state.personas);
     renderSessions(state.sessions);
     renderCoworkers(state.coworkers, state.agents);
     renderFeed(state.messages);
