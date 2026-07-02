@@ -86,7 +86,7 @@ export default {
       let b = {}; if (request.method === "POST") { try { b = await request.json(); } catch {} }
       const op = path.slice("/api/user/".length);
       const allowed = ["state", "taskInput", "agentMessage", "broadcast", "coworkerCall",
-                       "deleteTask", "getMemory", "setMemory"];
+                       "deleteTask", "getMemory", "setMemory", "runPersona"];
       if (!allowed.includes(op)) return res({ error: "unknown op" }, { status: 404 });
       return res(await callHub(env, { op, ...b, _actor: "user" }));
     }
@@ -108,7 +108,8 @@ export default {
       }
 
       const allowed = ["register", "heartbeat", "task", "inbox", "message", "coworkerCall",
-                       "coworkerResult", "registerCoworker", "getMemory", "setMemory", "sessions"];
+                       "coworkerResult", "registerCoworker", "getMemory", "setMemory", "sessions",
+                       "personas", "runPersona"];
       if (!allowed.includes(op)) return res({ error: "unknown op" }, { status: 404 });
       return res(await callHub(env, { op, ...b, _actor: "agent" }));
     }

@@ -20,6 +20,8 @@ export class HubState {
           { text: "# Gemeinsames Gedächtnis aller Claudes\n\n(Noch leer — im Dashboard bearbeiten.)\n", version: 0, updatedAt: 0, updatedBy: "system" },
         // Von den Bruecken gemeldete Chats/Sessions je Agent (Cowork + Claude Code).
         sessionsByAgent: (await this.state.storage.get("sessionsByAgent")) || {},
+        // Von den Bruecken gemeldete Personas/Experten je Agent.
+        personasByAgent: (await this.state.storage.get("personasByAgent")) || {},
         seq: (await this.state.storage.get("seq")) || 1,
       };
     });
@@ -79,6 +81,13 @@ export class HubState {
           // ohne bei jedem Refresh die evtl. gerade bearbeitete Textarea zu ueberschreiben.
           memory: { version: this.d.memory.version, updatedAt: this.d.memory.updatedAt, updatedBy: this.d.memory.updatedBy },
           memoryVersion: this.d.memory.version,
+          // Verfuegbare Personas/Experten (aus allen Bruecken zusammengefuehrt).
+          personas: Object.entries(this.d.personasByAgent).flatMap(([agentId, list]) =>
+            (list || []).map(p => ({
+              ...p, agentId,
+              agentName: this.d.agents[agentId]?.name || agentId,
+              online: now() - (this.d.agents[agentId]?.lastSeen || 0) < 45000,
+            }))),
           // Chats/Sessions je Quelle (Mac Cowork, Mac Claude Code, Hetzner …).
           sessions: Object.entries(this.d.sessionsByAgent).map(([agentId, v]) => ({
             agentId,
@@ -239,6 +248,34 @@ export class HubState {
         else this.d.coworkers.push({ name: m.name, actions: m.actions || [], providedBy: m.providedBy, ts: now() });
         await this.persist(["coworkers"]);
         return { ok: true };
+      }
+
+      // ---------- Personas/Experten ----------
+      case "personas": {
+        const a = this.d.agents[m.agentId];
+        if (a) a.lastSeen = now();
+        this.d.personasByAgent[m.agentId] = Array.isArray(m.personas) ? m.personas.slice(0, 100) : [];
+        await this.persist(["personasByAgent", "agents"]);
+        return { ok: true, count: (m.personas || []).length };
+      }
+
+      // Einer Persona eine Aufgabe geben -> an die Bruecke routen, die sie anbietet.
+      case "runPersona": {
+        let targetId = m.targetAgentId;
+        if (!targetId) {
+          for (const [aid, list] of Object.entries(this.d.personasByAgent)) {
+            if ((list || []).some(p => p.slug === m.slug)) { targetId = aid; break; }
+          }
+        }
+        if (!targetId || !this.d.agents[targetId]) throw new Error(`keine Persona '${m.slug}' online`);
+        const requestId = rid();
+        this.pushInbox(targetId, {
+          type: "persona", requestId, slug: m.slug, task: m.task,
+          replyTo: m._actor === "user" ? "user" : m.fromAgentId,
+        });
+        this.logEvent("persona", `Aufgabe an Persona '${m.slug}': ${trunc(m.task)}`, { requestId });
+        await this.persist(["inbox", "messages", "seq"]);
+        return { ok: true, requestId, agentId: targetId };
       }
 
       // ---------- Chats/Sessions einer Bruecke melden ----------
