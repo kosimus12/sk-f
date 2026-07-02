@@ -15,12 +15,15 @@ set -euo pipefail
 
 # --- Pfade bestimmen ---------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BRIDGE_JS="${SCRIPT_DIR}/claude-bridge.mjs"
 NOTIFY_SH="${SCRIPT_DIR}/hooks/notify.sh"
 STOP_SH="${SCRIPT_DIR}/hooks/stop.sh"
+REPO_PERSONAS_DIR="${REPO_DIR}/personas"
 
 HUB_DIR="${HOME}/.claude-hub"
 CONFIG_FILE="${HUB_DIR}/config.json"
+PERSONAS_DIR="${HUB_DIR}/personas"
 
 echo "=============================================="
 echo "  Claude Hub – Brücken-Agent Einrichtung"
@@ -90,12 +93,30 @@ cat > "${CONFIG_FILE}" <<JSON
   "TELEGRAM_HANDLER": "${TELEGRAM_HANDLER_VAL}",
   "CONTROL_PORT": "4599",
   "POLL_MS": "1500",
-  "HEARTBEAT_MS": "15000"
+  "HEARTBEAT_MS": "15000",
+  "PERSONAS_DIR": "${PERSONAS_DIR}"
 }
 JSON
 chmod 600 "${CONFIG_FILE}"
 echo
 echo "-> Konfiguration geschrieben: ${CONFIG_FILE} (chmod 600)"
+
+# --- Personas/Experten kopieren (bestehende NICHT überschreiben) -------------
+mkdir -p "${PERSONAS_DIR}"
+if [ -d "${REPO_PERSONAS_DIR}" ]; then
+  copied=0
+  for md in "${REPO_PERSONAS_DIR}"/*.md; do
+    [ -e "${md}" ] || continue
+    base="$(basename "${md}")"
+    # README nicht als Persona kopieren.
+    if [ "${base}" = "README.md" ]; then continue; fi
+    if [ ! -e "${PERSONAS_DIR}/${base}" ]; then
+      cp "${md}" "${PERSONAS_DIR}/${base}"
+      copied=$((copied+1))
+    fi
+  done
+  echo "-> Personas nach ${PERSONAS_DIR} kopiert (${copied} neu; bestehende unangetastet)"
+fi
 
 # --- Skripte ausführbar machen ----------------------------------------------
 chmod +x "${BRIDGE_JS}" "${NOTIFY_SH}" "${STOP_SH}" 2>/dev/null || true

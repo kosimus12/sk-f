@@ -101,6 +101,8 @@ const cfg = {
   SCAN_COWORK: pick('SCAN_COWORK', fileCfg, 'SCAN_COWORK', '1'),
   // Basisverzeichnis von Claude Code (Sessions unter <CLAUDE_HOME>/projects/…)
   CLAUDE_HOME: pick('CLAUDE_HOME', fileCfg, 'CLAUDE_HOME', join(HOME, '.claude')),
+  // Personas/Experten (*.md mit Frontmatter) – Verzeichnis
+  PERSONAS_DIR: pick('PERSONAS_DIR', fileCfg, 'PERSONAS_DIR', join(HOME, '.claude-hub', 'personas')),
 };
 
 // SOURCE_LABEL: Default = AGENT_NAME
@@ -404,6 +406,11 @@ async function processItem(item) {
       await handleTelegram(item);
       break;
     }
+    case 'persona': {
+      // Persona/Experte headless ausführen und Ergebnis als Aufgabe melden.
+      await handlePersona(item);
+      break;
+    }
     default:
       logToInbox(`[Unbekanntes Item ${item.type || '?'}] ${JSON.stringify(item)}`);
   }
@@ -488,6 +495,98 @@ async function handleTelegram(item) {
   const r = await hubPost('/api/agent/telegramReply', { chatId, text: reply });
   if (r.ok) ok(`Telegram-Antwort gesendet (chat ${chatId}).`);
   else warn('Telegram-Antwort konnte nicht an den Hub gesendet werden.');
+}
+
+// Ruft das Claude-CLI headless mit einem festen System-Prompt (Persona) auf.
+// Liefert stdout (getrimmt) oder wirft bei Fehler/Timeout.
+function runClaudeWithSystem(task, systemPrompt) {
+  return new Promise((resolve, reject) => {
+    // Argumente als Array – KEINE String-Interpolation (kein Shell-Injection).
+    const args = ['-p', String(task || ''), '--output-format', 'text'];
+    const flag = cfg.CLAUDE_SYSTEM_FLAG || '--append-system-prompt';
+    if (systemPrompt) args.push(flag, String(systemPrompt));
+
+    const opts = { encoding: 'utf8', cwd: cfg.CLAUDE_CWD || HOME };
+
+    let child;
+    try {
+      child = spawn(cfg.CLAUDE_CMD, args, opts);
+    } catch (e) {
+      reject(new Error(`Claude-CLI-Start fehlgeschlagen: ${e.message}`));
+      return;
+    }
+
+    let out = '';
+    let errOut = '';
+    let finished = false;
+
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+      reject(new Error(`Zeitüberschreitung nach ${Math.round(cfg.CLAUDE_TIMEOUT_MS / 1000)}s`));
+    }, cfg.CLAUDE_TIMEOUT_MS);
+
+    child.stdout && child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr && child.stderr.on('data', (d) => { errOut += d.toString(); });
+    child.on('error', (e) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      reject(new Error(`Claude-CLI-Fehler: ${e.message}`));
+    });
+    child.on('close', (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(`Claude-CLI beendet mit Code ${code}: ${(errOut || '').trim().slice(0, 300)}`));
+    });
+  });
+}
+
+async function handlePersona(item) {
+  const slug = item && item.slug ? String(item.slug) : '';
+  const task = item && item.task ? String(item.task) : '';
+  const shortTask = truncate(task, 60);
+
+  const persona = slug ? personaMeta.get(slug) : null;
+  const name = (persona && persona.name) || slug || 'Persona';
+  const title = `${name}: ${shortTask || '(ohne Aufgabe)'}`;
+
+  // System-Prompt aus der Map holen, Fallback: Datei erneut lesen.
+  let systemPrompt = slug ? personaPrompts.get(slug) : '';
+  if (!systemPrompt && slug) {
+    const parsed = readPersonaFile(join(cfg.PERSONAS_DIR, `${slug}.md`));
+    if (parsed) systemPrompt = parsed.body;
+  }
+
+  if (!slug || !systemPrompt) {
+    warn(`Persona-Auftrag mit unbekanntem slug „${slug}".`);
+    await hubPost('/api/agent/task', {
+      agentId,
+      title,
+      status: 'error',
+      note: `Unbekannte Persona „${slug}". Verfügbare: ${[...personaMeta.keys()].join(', ') || '(keine)'}`,
+    });
+    return;
+  }
+
+  info(`Persona „${slug}" ausführen: ${shortTask}`);
+  let note;
+  let status = 'done';
+  try {
+    note = await runClaudeWithSystem(task, systemPrompt);
+    if (!note) note = '(leere Antwort)';
+  } catch (e) {
+    warn(`Persona-Verarbeitung fehlgeschlagen: ${e.message}`);
+    status = 'error';
+    note = `⚠️ Konnte die Persona-Aufgabe nicht bearbeiten: ${e.message}`;
+  }
+
+  const r = await hubPost('/api/agent/task', { agentId, title, status, note });
+  if (r.ok) ok(`Persona-Ergebnis gemeldet (${slug}, ${status}).`);
+  else warn('Persona-Ergebnis konnte nicht an den Hub gemeldet werden.');
 }
 
 async function pollInbox() {
@@ -886,6 +985,100 @@ function scanCowork() {
 
 let coworkNoticeLogged = false;
 
+// ---------------------------------------------------------------------------
+// Personas / Experten (*.md mit YAML-Frontmatter)
+// ---------------------------------------------------------------------------
+// slug -> System-Prompt (Body) und slug -> {slug,name,role,model}
+const personaPrompts = new Map();
+const personaMeta = new Map();
+
+// Liest eine Persona-Datei und parst Frontmatter + Body.
+// Rückgabe { meta:{name,role,model,slug?}, body } oder null.
+function readPersonaFile(filePath) {
+  let raw = '';
+  try { raw = readFileSync(filePath, 'utf8'); } catch { return null; }
+  // Frontmatter zwischen den ersten beiden `---`-Zeilen.
+  const lines = raw.split(/\r?\n/);
+  if (lines[0] == null || lines[0].trim() !== '---') {
+    // Kein Frontmatter -> ganze Datei ist Body (keine echte Persona).
+    return { meta: {}, body: raw.trim(), hasFrontmatter: false };
+  }
+  const meta = {};
+  let i = 1;
+  for (; i < lines.length; i++) {
+    if (lines[i].trim() === '---') { i++; break; }
+    const m = lines[i].match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    if (m) {
+      let val = m[2].trim();
+      // Umschließende Anführungszeichen entfernen.
+      val = val.replace(/^["'](.*)["']$/, '$1');
+      meta[m[1].toLowerCase()] = val;
+    }
+  }
+  const body = lines.slice(i).join('\n').trim();
+  return { meta, body, hasFrontmatter: true };
+}
+
+// Scannt PERSONAS_DIR nach *.md, füllt personaPrompts/personaMeta neu.
+// Rückgabe { personas:[{slug,name,role,model}], dirExists }.
+function scanPersonas() {
+  const dir = cfg.PERSONAS_DIR;
+  if (!existsSync(dir)) return { personas: [], dirExists: false };
+
+  let files = [];
+  try { files = readdirSync(dir); } catch { return { personas: [], dirExists: true }; }
+
+  const personas = [];
+  const nextPrompts = new Map();
+  const nextMeta = new Map();
+
+  for (const f of files) {
+    if (!f.endsWith('.md')) continue;
+    const fp = join(dir, f);
+    let fst;
+    try { fst = statSync(fp); } catch { continue; }
+    if (!fst.isFile()) continue;
+    const parsed = readPersonaFile(fp);
+    if (!parsed) continue;
+    // Ohne Frontmatter ist es keine echte Persona (z.B. README.md) -> überspringen.
+    if (!parsed.hasFrontmatter) continue;
+    const meta = parsed.meta || {};
+    const slug = (meta.slug && String(meta.slug).trim()) || f.slice(0, -'.md'.length);
+    if (!slug) continue;
+    const entry = {
+      slug,
+      name: (meta.name && String(meta.name).trim()) || slug,
+      role: meta.role ? String(meta.role).trim() : '',
+      model: meta.model ? String(meta.model).trim() : '',
+    };
+    personas.push(entry);
+    nextMeta.set(slug, entry);
+    nextPrompts.set(slug, parsed.body || '');
+  }
+
+  // Maps atomar ersetzen.
+  personaPrompts.clear();
+  personaMeta.clear();
+  for (const [k, v] of nextPrompts) personaPrompts.set(k, v);
+  for (const [k, v] of nextMeta) personaMeta.set(k, v);
+
+  return { personas, dirExists: true };
+}
+
+// Meldet die aktuelle Persona-Liste an den Hub.
+async function reportPersonas() {
+  if (!agentId) return 0;
+  const { personas } = scanPersonas();
+  try {
+    const r = await hubPost('/api/agent/personas', { agentId, personas });
+    if (r.ok) info(`Personas gemeldet: ${personas.length}`);
+    else warn('Personas konnten nicht an den Hub gemeldet werden.');
+  } catch (e) {
+    warn(`Personas-Meldung fehlgeschlagen: ${e.message}`);
+  }
+  return personas.length;
+}
+
 async function runScan() {
   let items = [];
   let codeCount = 0;
@@ -924,6 +1117,10 @@ async function runScan() {
   } catch (e) {
     warn(`Sessions-Meldung fehlgeschlagen: ${e.message}`);
   }
+
+  // Personas ebenfalls im Scan-Takt aktualisieren.
+  try { await reportPersonas(); } catch (e) { warn(`Persona-Scan-Fehler: ${e.message}`); }
+
   return { codeCount, coworkCount };
 }
 
@@ -1007,12 +1204,21 @@ async function main() {
         info(`Cowork: ${cw.items.length} Sessions gefunden.`);
       }
     }
+    // Personas laden + loggen (still, wenn PERSONAS_DIR nicht existiert).
+    const pr = scanPersonas();
+    if (pr.dirExists) {
+      const slugs = pr.personas.map((p) => p.slug);
+      info(`Personas: ${pr.personas.length} geladen (${slugs.join(', ') || '–'})`);
+    }
   } catch (e) { warn(`Scanner-Startinfo-Fehler: ${e.message}`); }
+
+  // Personas einmal beim Start an den Hub melden.
+  try { await reportPersonas(); } catch (e) { warn(`Persona-Startmeldung: ${e.message}`); }
 
   startControlServer();
   startHeartbeatLoop();
   startPollLoop();
-  if (String(cfg.SCAN_CODE) !== '0' || String(cfg.SCAN_COWORK) !== '0') startScanLoop();
+  startScanLoop();
 
   ok('Brücken-Agent läuft. Strg+C zum Beenden.');
 }

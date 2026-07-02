@@ -417,13 +417,50 @@ welche Sessions offen/erledigt sind.
 - `SCAN_CODE` – Claude-Code-Scan an (`1`, Default) / aus (`0`).
 - `SCAN_COWORK` – Cowork-Scan an (`1`, Default) / aus (`0`).
 - `CLAUDE_HOME` – Basisverzeichnis von Claude Code. Default `~/.claude`.
+- `PERSONAS_DIR` – Verzeichnis der Personas/Experten. Default
+  `~/.claude-hub/personas`.
 
 Beim Start loggt die Bridge, wie viele Claude-Code-Sessions gefunden wurden und
 ob ein Cowork-Store gefunden wurde.
 
 ---
 
-## 13. Sicherheit
+## 13. Experten/Personas
+
+Du kannst dir **Experten-Personas** (z.B. CIO, Coach, Consultant) einrichten,
+die im Dashboard auswählbar sind. Schickst du einer Persona eine Aufgabe, führt
+die Bridge sie **headless über dein lokales Claude-CLI** aus (wie bei Telegram,
+Abschnitt 11) – mit dem System-Prompt der Persona – und meldet das Ergebnis als
+erledigte Aufgabe zurück.
+
+**Wie es funktioniert**
+
+- Personas liegen als Markdown-Dateien in `~/.claude-hub/personas/*.md`. Jede
+  Datei hat ein YAML-Frontmatter und danach den System-Prompt:
+
+  ```markdown
+  ---
+  name: CIO
+  slug: cio
+  role: IT-Strategie, Infrastruktur & Sicherheit
+  model: Opus 4.8
+  ---
+
+  Du bist der CIO von … (System-Prompt / Arbeitsweise der Persona)
+  ```
+
+- Die Bridge scannt den Ordner beim Start und im Scan-Takt (`SCAN_MS`) und
+  meldet die Liste `{slug, name, role, model}` an den Hub. Startlog:
+  `Personas: N geladen (…)`. Existiert der Ordner nicht, bleibt es still.
+- Beim Setup (`install.sh`) werden die mitgelieferten Repo-Personas nach
+  `~/.claude-hub/personas/` kopiert – **bestehende Dateien werden nie
+  überschrieben**, du kannst sie also anpassen.
+- **Neue Persona = neue `.md`-Datei** in `~/.claude-hub/personas/`. Beim
+  nächsten Scan taucht sie automatisch im Dashboard auf.
+
+---
+
+## 14. Sicherheit
 
 - **Login:** Passwort **und** 2FA (TOTP) – beides nötig.
 - **Agent-Token:** Jeder Bridge-Request trägt `x-agent-token`. Ohne gültiges
@@ -441,7 +478,7 @@ ob ein Cowork-Store gefunden wurde.
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **Agent erscheint als offline**
 - Läuft die Bridge? (`node bridge/claude-bridge.mjs` bzw.
