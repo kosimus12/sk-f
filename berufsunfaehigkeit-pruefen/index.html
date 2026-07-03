@@ -96,13 +96,314 @@
 
     
     <section class="section section--muted pruef-upload" id="fragen" aria-labelledby="fragen-title">
+      <style>
+        .wizard-progress{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;position:relative}
+        .wizard-progress::before{content:"";position:absolute;top:50%;left:0;right:0;height:3px;background:#e0e0e0;z-index:0;transform:translateY(-50%)}
+        .wizard-progress__bar{position:absolute;top:50%;left:0;height:3px;background:#0066CC;z-index:1;transform:translateY(-50%);transition:width .3s ease}
+        .wizard-progress__step{position:relative;z-index:2;width:36px;height:36px;border-radius:50%;background:#e0e0e0;color:#666;display:flex;align-items:center;justify-content:center;font-family:'Poppins',sans-serif;font-weight:600;font-size:.875rem;transition:background .3s,color .3s}
+        .wizard-progress__step.active,.wizard-progress__step.done{background:#0066CC;color:#fff}
+        .wizard-progress__step.done{background:#0A1A5C}
+        .wizard-step{display:none}
+        .wizard-step.active{display:block}
+        .wizard-form label{display:block;font-weight:500;margin-bottom:.35rem;color:#333;font-size:.925rem}
+        .wizard-form .field{margin-bottom:1.25rem}
+        .wizard-form input[type="text"],.wizard-form input[type="email"],.wizard-form input[type="tel"],.wizard-form input[type="date"],.wizard-form input[type="number"],.wizard-form select,.wizard-form textarea{width:100%;padding:.7rem .9rem;border:1px solid #ccc;border-radius:6px;font-size:1rem;font-family:'Inter',sans-serif;background:#fff;transition:border-color .2s}
+        .wizard-form input:focus,.wizard-form select:focus,.wizard-form textarea:focus{outline:none;border-color:#0066CC;box-shadow:0 0 0 3px rgba(0,102,204,.12)}
+        .wizard-form textarea{resize:vertical;min-height:90px}
+        .wizard-form .field-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+        @media(max-width:600px){.wizard-form .field-row{grid-template-columns:1fr}}
+        .wizard-form .toggle-group{display:flex;gap:.75rem;align-items:center}
+        .wizard-form .toggle-group button{padding:.45rem 1.1rem;border:1px solid #ccc;border-radius:20px;background:#fff;cursor:pointer;font-size:.9rem;transition:background .2s,border-color .2s}
+        .wizard-form .toggle-group button.selected{background:#0066CC;color:#fff;border-color:#0066CC}
+        .wizard-nav{display:flex;justify-content:space-between;margin-top:2rem;gap:1rem}
+        .wizard-nav .btn--back{background:transparent;color:#0A1A5C;border:1px solid #0A1A5C;padding:.7rem 1.5rem;border-radius:6px;font-size:1rem;cursor:pointer;font-weight:500}
+        .wizard-nav .btn--back:hover{background:#0A1A5C;color:#fff}
+        .wizard-nav .btn--next,.wizard-nav .btn--submit{background:#C8A24B;color:#fff;border:none;padding:.7rem 1.8rem;border-radius:6px;font-size:1rem;cursor:pointer;font-weight:600;font-family:'Poppins',sans-serif;transition:background .2s}
+        .wizard-nav .btn--next:hover,.wizard-nav .btn--submit:hover{background:#F0B429}
+        .wizard-form .file-upload{border:2px dashed #ccc;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color .2s;background:#fafafa}
+        .wizard-form .file-upload:hover{border-color:#0066CC}
+        .wizard-form .file-upload input{display:none}
+        .wizard-form .file-upload__label{color:#555;font-size:.95rem}
+        .wizard-form .consent-label{display:flex;align-items:flex-start;gap:.6rem;font-size:.85rem;line-height:1.5;color:#555}
+        .wizard-form .consent-label input{margin-top:.2rem;flex-shrink:0}
+        .wizard-form .error-msg{color:#c0392b;font-size:.8rem;margin-top:.25rem;display:none}
+        .wizard-form .field.has-error input,.wizard-form .field.has-error select,.wizard-form .field.has-error textarea{border-color:#c0392b}
+        .wizard-form .field.has-error .error-msg{display:block}
+      </style>
       <div class="container container--narrow">
         <h2 id="fragen-title">Berufsunfähigkeitsversicherung prüfen lassen - in wenigen Minuten</h2>
         <p class="section-head__sub">Beantworten Sie ein paar kurze Fragen zu Ihrem Vertrag oder Angebot. Ich melde mich mit einer ehrlichen Einschätzung bei Ihnen.</p>
-        <iframe class="pruef-upload__frame" data-tally-src="https://tally.so/r/jagMVa?thema=Berufsunf%C3%A4higkeitsversicherung&amp;transparentBackground=1&amp;dynamicHeight=1" loading="lazy" title="Fragen zum Vertragscheck beantworten"></iframe>
-        <script async src="https://tally.so/widgets/embed.js"></script>
-        <p class="pruef-upload__consent">Mit dem Absenden bestätigen Sie, dass Sie die Prüfung Ihres Vertrags bzw. Angebots ausdrücklich wünschst, und willigst in die Verarbeitung der angegebenen Daten zu diesem Zweck ein (jederzeit widerrufbar). Details in der <a href="/datenschutz/">Datenschutzerklärung</a>.</p>
+
+        <div class="wizard-progress" aria-hidden="true">
+          <div class="wizard-progress__bar" style="width:0%"></div>
+          <span class="wizard-progress__step active">1</span>
+          <span class="wizard-progress__step">2</span>
+          <span class="wizard-progress__step">3</span>
+        </div>
+
+        <form class="wizard-form" id="bu-wizard" method="POST" enctype="multipart/form-data" action="https://vertragscheck.sk-finanzberatung.de/upload" novalidate>
+          <input type="hidden" name="token" value="sk-vc-2026-sicher-a61c0f43de5846e2">
+          <input type="hidden" name="thema" value="Berufsunfähigkeitsversicherung">
+          <div style="position:absolute;left:-9999px" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off"></div>
+
+          <!-- Step 1: Persönliche Angaben -->
+          <div class="wizard-step active" data-step="1">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Persönliche Angaben</h3>
+            <div class="field-row">
+              <div class="field">
+                <label for="vorname">Vorname *</label>
+                <input type="text" id="vorname" name="vorname" required>
+                <span class="error-msg">Bitte Vorname eingeben.</span>
+              </div>
+              <div class="field">
+                <label for="nachname">Nachname *</label>
+                <input type="text" id="nachname" name="nachname" required>
+                <span class="error-msg">Bitte Nachname eingeben.</span>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="email">E-Mail *</label>
+                <input type="email" id="email" name="email" required>
+                <span class="error-msg">Bitte gültige E-Mail eingeben.</span>
+              </div>
+              <div class="field">
+                <label for="telefon">Telefon *</label>
+                <input type="tel" id="telefon" name="telefon" required>
+                <span class="error-msg">Bitte Telefonnummer eingeben.</span>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="geburtsdatum">Geburtsdatum</label>
+                <input type="date" id="geburtsdatum" name="geburtsdatum">
+              </div>
+              <div class="field">
+                <label for="beruf_status">Beruf/Status</label>
+                <select id="beruf_status" name="beruf">
+                  <option value="">— bitte wählen —</option>
+                  <option value="Angestellt">Angestellt</option>
+                  <option value="Beamter/Anwärter">Beamter/Anwärter</option>
+                  <option value="Student">Student</option>
+                  <option value="Selbstständig">Selbstständig</option>
+                  <option value="Sonstiges">Sonstiges</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="familienstand">Familienstand</label>
+                <select id="familienstand" name="familienstand">
+                  <option value="">— bitte wählen —</option>
+                  <option value="ledig">ledig</option>
+                  <option value="verheiratet">verheiratet</option>
+                  <option value="Partnerschaft">Partnerschaft</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="nettoeinkommen">Monatliches Nettoeinkommen (€)</label>
+                <input type="number" id="nettoeinkommen" name="nettoeinkommen" min="0" step="100" placeholder="z.B. 2500">
+              </div>
+            </div>
+            <div class="field">
+              <label>Kinder?</label>
+              <div class="toggle-group" id="kinder-toggle">
+                <button type="button" data-value="ja">Ja</button>
+                <button type="button" data-value="nein" class="selected">Nein</button>
+              </div>
+              <input type="hidden" name="kinder" id="kinder-hidden" value="nein">
+            </div>
+            <div class="field" id="kinder-details" style="display:none">
+              <label for="kinder_details">Anzahl & Alter der Kinder</label>
+              <input type="text" id="kinder_details" name="kinder_details" placeholder="z.B. 2 Kinder, 3 und 6 Jahre">
+            </div>
+            <div class="wizard-nav">
+              <span></span>
+              <button type="button" class="btn--next" data-next="2">Weiter</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Berufsunfähigkeit -->
+          <div class="wizard-step" data-step="2">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Angaben zur Berufsunfähigkeit</h3>
+            <div class="field">
+              <label for="taetigkeit">Ausgeübter Beruf & genaue Tätigkeit *</label>
+              <input type="text" id="taetigkeit" name="taetigkeit" required placeholder="z.B. Bürokauffrau, 80% Bildschirmarbeit">
+              <span class="error-msg">Bitte Beruf/Tätigkeit angeben.</span>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="beamtenstatus">Beamtenstatus</label>
+                <select id="beamtenstatus" name="beamtenstatus">
+                  <option value="">— bitte wählen —</option>
+                  <option value="Anwärter">Anwärter</option>
+                  <option value="auf Probe">auf Probe</option>
+                  <option value="auf Lebenszeit">auf Lebenszeit</option>
+                  <option value="kein Beamter">kein Beamter</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Raucher?</label>
+                <div class="toggle-group" id="raucher-toggle">
+                  <button type="button" data-value="ja">Ja</button>
+                  <button type="button" data-value="nein" class="selected">Nein</button>
+                </div>
+                <input type="hidden" name="raucher" id="raucher-hidden" value="nein">
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="groesse">Größe (cm)</label>
+                <input type="number" id="groesse" name="groesse" min="100" max="250" placeholder="175">
+              </div>
+              <div class="field">
+                <label for="gewicht">Gewicht (kg)</label>
+                <input type="number" id="gewicht" name="gewicht" min="30" max="300" placeholder="75">
+              </div>
+            </div>
+            <div class="field">
+              <label for="vorerkrankungen">Vorerkrankungen/Behandlungen letzte 5 Jahre</label>
+              <textarea id="vorerkrankungen" name="vorerkrankungen" placeholder="z.B. Bandscheibenvorfall 2023, Physiotherapie"></textarea>
+            </div>
+            <div class="field">
+              <label for="beschwerden">Aktuelle Beschwerden oder Medikamente</label>
+              <textarea id="beschwerden" name="beschwerden" placeholder="z.B. Ibuprofen bei Bedarf, keine Dauermedikation"></textarea>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="bu_rente">Gewünschte monatliche BU-/DU-Rente (€)</label>
+                <input type="number" id="bu_rente" name="bu_rente" min="0" step="100" placeholder="z.B. 2000">
+              </div>
+              <div class="field">
+                <label for="rentenbeginn_alter">Gewünschter Rentenbeginn (Alter)</label>
+                <input type="number" id="rentenbeginn_alter" name="rentenbeginn_alter" min="50" max="70" placeholder="67">
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn--back" data-prev="1">Zurück</button>
+              <button type="button" class="btn--next" data-next="3">Weiter</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Unterlagen & Absenden -->
+          <div class="wizard-step" data-step="3">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Unterlagen & Absenden</h3>
+            <div class="field">
+              <label>Police oder Angebot (Foto oder PDF)</label>
+              <div class="file-upload" id="file-drop">
+                <input type="file" id="dateien" name="dateien" multiple accept=".pdf,.jpg,.jpeg,.png,.heic">
+                <p class="file-upload__label">Dateien hierher ziehen oder <strong>klicken</strong> zum Auswählen<br><small>PDF, JPG, PNG, HEIC — mehrere Dateien möglich</small></p>
+              </div>
+              <div id="file-list" style="margin-top:.5rem;font-size:.85rem;color:#555"></div>
+            </div>
+            <div class="field">
+              <label for="anmerkungen">Anmerkungen (optional)</label>
+              <textarea id="anmerkungen" name="anmerkungen" placeholder="Worauf sollen wir besonders achten?"></textarea>
+            </div>
+            <div class="field">
+              <label class="consent-label">
+                <input type="checkbox" id="einwilligung" name="einwilligung" value="ja" required>
+                <span>Ich wünsche ausdrücklich die kostenlose Prüfung meiner hochgeladenen Unterlagen durch SK-Finanzberatung (Simon Kuper) und willige in die Verarbeitung der Daten zu diesem Zweck ein. Mir ist bekannt, dass ich diese Einwilligung jederzeit widerrufen kann. Details in der <a href="/datenschutz/">Datenschutzerklärung</a>.</span>
+              </label>
+              <span class="error-msg" id="consent-error">Bitte Einwilligung bestätigen.</span>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn--back" data-prev="2">Zurück</button>
+              <button type="submit" class="btn--submit">Kostenlos prüfen lassen</button>
+            </div>
+          </div>
+        </form>
       </div>
+
+      <script>
+        (function(){
+          var form=document.getElementById('bu-wizard');
+          var steps=form.querySelectorAll('.wizard-step');
+          var progSteps=document.querySelectorAll('.wizard-progress__step');
+          var progBar=document.querySelector('.wizard-progress__bar');
+          var current=1;
+
+          function showStep(n){
+            steps.forEach(function(s){s.classList.remove('active')});
+            form.querySelector('[data-step="'+n+'"]').classList.add('active');
+            progSteps.forEach(function(p,i){
+              p.classList.remove('active','done');
+              if(i+1<n)p.classList.add('done');
+              else if(i+1===n)p.classList.add('active');
+            });
+            progBar.style.width=((n-1)/2*100)+'%';
+            current=n;
+          }
+
+          function validateStep(n){
+            var step=form.querySelector('[data-step="'+n+'"]');
+            var fields=step.querySelectorAll('[required]');
+            var valid=true;
+            fields.forEach(function(f){
+              var parent=f.closest('.field')||f.parentElement;
+              if(f.type==='checkbox'){
+                if(!f.checked){valid=false;var err=document.getElementById('consent-error');if(err)err.style.display='block';}
+                else{var err=document.getElementById('consent-error');if(err)err.style.display='none';}
+                return;
+              }
+              if(!f.value.trim()||(f.type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.value))){
+                valid=false;if(parent)parent.classList.add('has-error');
+              }else{
+                if(parent)parent.classList.remove('has-error');
+              }
+            });
+            return valid;
+          }
+
+          form.addEventListener('click',function(e){
+            var btn=e.target.closest('[data-next]');
+            if(btn){
+              e.preventDefault();
+              if(validateStep(current)){showStep(parseInt(btn.getAttribute('data-next')));}
+            }
+            var back=e.target.closest('[data-prev]');
+            if(back){e.preventDefault();showStep(parseInt(back.getAttribute('data-prev')));}
+          });
+
+          // Toggle buttons (Kinder, Raucher)
+          document.querySelectorAll('.toggle-group').forEach(function(group){
+            group.querySelectorAll('button').forEach(function(btn){
+              btn.addEventListener('click',function(e){
+                e.preventDefault();
+                group.querySelectorAll('button').forEach(function(b){b.classList.remove('selected')});
+                btn.classList.add('selected');
+                var hidden=group.nextElementSibling;
+                if(hidden&&hidden.type==='hidden')hidden.value=btn.getAttribute('data-value');
+                // Kinder details toggle
+                if(group.id==='kinder-toggle'){
+                  var details=document.getElementById('kinder-details');
+                  details.style.display=btn.getAttribute('data-value')==='ja'?'block':'none';
+                }
+              });
+            });
+          });
+
+          // File upload UX
+          var fileDrop=document.getElementById('file-drop');
+          var fileInput=document.getElementById('dateien');
+          var fileList=document.getElementById('file-list');
+          fileDrop.addEventListener('click',function(){fileInput.click()});
+          fileDrop.addEventListener('dragover',function(e){e.preventDefault();fileDrop.style.borderColor='#0066CC'});
+          fileDrop.addEventListener('dragleave',function(){fileDrop.style.borderColor='#ccc'});
+          fileDrop.addEventListener('drop',function(e){e.preventDefault();fileDrop.style.borderColor='#ccc';fileInput.files=e.dataTransfer.files;showFiles()});
+          fileInput.addEventListener('change',showFiles);
+          function showFiles(){
+            var names=[];
+            for(var i=0;i<fileInput.files.length;i++)names.push(fileInput.files[i].name);
+            fileList.textContent=names.length?names.join(', '):'';
+          }
+
+          // Form submit validation
+          form.addEventListener('submit',function(e){
+            if(!validateStep(3)){e.preventDefault();}
+          });
+        })();
+      </script>
     </section>
 
     <section class="section">

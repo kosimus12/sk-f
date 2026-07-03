@@ -100,9 +100,210 @@
       <div class="container container--narrow">
         <h2 id="fragen-title">Vertrag prüfen lassen – in wenigen Minuten</h2>
         <p class="section-head__sub">Beantworte ein paar kurze Fragen zu deinem Vertrag oder Angebot. Ich melde mich mit einer ehrlichen Einschätzung bei dir.</p>
-        <iframe class="pruef-upload__frame" data-tally-src="https://tally.so/r/jagMVa?thema=Vertragscheck&amp;transparentBackground=1&amp;dynamicHeight=1" loading="lazy" title="Fragen zum Vertragscheck beantworten"></iframe>
-        <script async src="https://tally.so/widgets/embed.js"></script>
-        <p class="pruef-upload__consent">Mit dem Absenden bestätigst du, dass du die Prüfung deines Vertrags bzw. Angebots ausdrücklich wünschst, und willigst in die Verarbeitung der angegebenen Daten zu diesem Zweck ein (jederzeit widerrufbar). Details in der <a href="/datenschutz/">Datenschutzerklärung</a>.</p>
+        <style>
+          .wizard-progress{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;position:relative}
+          .wizard-progress::before{content:"";position:absolute;top:50%;left:0;right:0;height:3px;background:#e0e0e0;z-index:0;transform:translateY(-50%)}
+          .wizard-progress__bar{position:absolute;top:50%;left:0;height:3px;background:#0066CC;z-index:1;transform:translateY(-50%);transition:width .3s ease}
+          .wizard-progress__step{position:relative;z-index:2;width:36px;height:36px;border-radius:50%;background:#e0e0e0;color:#666;display:flex;align-items:center;justify-content:center;font-family:'Poppins',sans-serif;font-weight:600;font-size:.875rem;transition:background .3s,color .3s}
+          .wizard-progress__step.active,.wizard-progress__step.done{background:#0066CC;color:#fff}
+          .wizard-progress__step.done{background:#0A1A5C}
+          .wizard-step{display:none}
+          .wizard-step.active{display:block}
+          .wizard-form label{display:block;font-weight:500;margin-bottom:.35rem;color:#333;font-size:.925rem}
+          .wizard-form .field{margin-bottom:1.25rem}
+          .wizard-form input[type="text"],.wizard-form input[type="email"],.wizard-form input[type="tel"],.wizard-form input[type="date"],.wizard-form input[type="number"],.wizard-form select,.wizard-form textarea{width:100%;padding:.7rem .9rem;border:1px solid #ccc;border-radius:6px;font-size:1rem;font-family:'Inter',sans-serif;background:#fff;transition:border-color .2s}
+          .wizard-form input:focus,.wizard-form select:focus,.wizard-form textarea:focus{outline:none;border-color:#0066CC;box-shadow:0 0 0 3px rgba(0,102,204,.12)}
+          .wizard-form textarea{resize:vertical;min-height:90px}
+          .wizard-form .field-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+          @media(max-width:600px){.wizard-form .field-row{grid-template-columns:1fr}}
+          .wizard-nav{display:flex;justify-content:space-between;margin-top:2rem;gap:1rem}
+          .wizard-nav .btn--back{background:transparent;color:#0A1A5C;border:1px solid #0A1A5C;padding:.7rem 1.5rem;border-radius:6px;font-size:1rem;cursor:pointer;font-weight:500}
+          .wizard-nav .btn--back:hover{background:#0A1A5C;color:#fff}
+          .wizard-nav .btn--next,.wizard-nav .btn--submit{background:#C8A24B;color:#fff;border:none;padding:.7rem 1.8rem;border-radius:6px;font-size:1rem;cursor:pointer;font-weight:600;font-family:'Poppins',sans-serif;transition:background .2s}
+          .wizard-nav .btn--next:hover,.wizard-nav .btn--submit:hover{background:#F0B429}
+          .wizard-form .file-upload{border:2px dashed #ccc;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color .2s;background:#fafafa}
+          .wizard-form .file-upload:hover{border-color:#0066CC}
+          .wizard-form .file-upload input{display:none}
+          .wizard-form .file-upload__label{color:#555;font-size:.95rem}
+          .wizard-form .consent-label{display:flex;align-items:flex-start;gap:.6rem;font-size:.85rem;line-height:1.5;color:#555}
+          .wizard-form .consent-label input{margin-top:.2rem;flex-shrink:0}
+          .wizard-form .error-msg{color:#c0392b;font-size:.8rem;margin-top:.25rem;display:none}
+          .wizard-form .field.has-error input,.wizard-form .field.has-error select,.wizard-form .field.has-error textarea{border-color:#c0392b}
+          .wizard-form .field.has-error .error-msg{display:block}
+        </style>
+
+        <div class="wizard-progress" aria-hidden="true">
+          <div class="wizard-progress__bar" style="width:0%"></div>
+          <span class="wizard-progress__step active">1</span>
+          <span class="wizard-progress__step">2</span>
+          <span class="wizard-progress__step">3</span>
+        </div>
+
+        <form class="wizard-form" id="vc-wizard" method="POST" enctype="multipart/form-data" action="https://vertragscheck.sk-finanzberatung.de/upload" novalidate>
+          <input type="hidden" name="token" value="sk-vc-2026-sicher-a61c0f43de5846e2">
+          <input type="hidden" name="thema" value="Vertragscheck">
+          <input type="hidden" name="brand" value="finanzwaschbaer">
+          <div style="position:absolute;left:-9999px" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off"></div>
+
+          <!-- Step 1: Persönliche Angaben -->
+          <div class="wizard-step active" data-step="1">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Persönliche Angaben</h3>
+            <div class="field-row">
+              <div class="field">
+                <label for="vorname">Vorname *</label>
+                <input type="text" id="vorname" name="vorname" required>
+                <span class="error-msg">Bitte Vorname eingeben.</span>
+              </div>
+              <div class="field">
+                <label for="nachname">Nachname *</label>
+                <input type="text" id="nachname" name="nachname" required>
+                <span class="error-msg">Bitte Nachname eingeben.</span>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="email">E-Mail *</label>
+                <input type="email" id="email" name="email" required>
+                <span class="error-msg">Bitte gültige E-Mail eingeben.</span>
+              </div>
+              <div class="field">
+                <label for="telefon">Telefon *</label>
+                <input type="tel" id="telefon" name="telefon" required>
+                <span class="error-msg">Bitte Telefonnummer eingeben.</span>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="geburtsdatum">Geburtsdatum</label>
+                <input type="date" id="geburtsdatum" name="geburtsdatum">
+              </div>
+              <div class="field">
+                <label for="beruf_status">Beruf/Status</label>
+                <select id="beruf_status" name="beruf">
+                  <option value="">— bitte wählen —</option>
+                  <option value="Angestellt">Angestellt</option>
+                  <option value="Beamter/Anwärter">Beamter/Anwärter</option>
+                  <option value="Referendar">Referendar</option>
+                  <option value="Lehrkraft">Lehrkraft</option>
+                  <option value="Student">Student</option>
+                  <option value="Sonstiges">Sonstiges</option>
+                </select>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <span></span>
+              <button type="button" class="btn--next" data-next="2">Weiter</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Vertrag/Angebot -->
+          <div class="wizard-step" data-step="2">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Vertrag oder Angebot</h3>
+            <div class="field">
+              <label for="vertragsart">Was möchtest du prüfen lassen? *</label>
+              <select id="vertragsart" name="vertragsart" required>
+                <option value="">— bitte wählen —</option>
+                <option value="Dienstunfähigkeitsversicherung">Dienstunfähigkeitsversicherung</option>
+                <option value="Private Krankenversicherung">Private Krankenversicherung</option>
+                <option value="Diensthaftpflicht">Diensthaftpflicht</option>
+                <option value="Renten-/Vorsorgevertrag">Renten-/Vorsorgevertrag</option>
+                <option value="Sonstiges">Sonstiges</option>
+              </select>
+              <span class="error-msg">Bitte auswählen.</span>
+            </div>
+            <div class="field">
+              <label for="vertrag_status">Bestehender Vertrag oder neues Angebot?</label>
+              <select id="vertrag_status" name="vertrag_status">
+                <option value="">— bitte wählen —</option>
+                <option value="bestehender Vertrag">bestehender Vertrag</option>
+                <option value="neues Angebot">neues Angebot</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="anmerkungen">Was ist dir wichtig? Was soll ich besonders beachten?</label>
+              <textarea id="anmerkungen" name="anmerkungen" placeholder="z.B. Ich bin unsicher, ob die Klauseln passen oder ob der Beitrag fair ist."></textarea>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn--back" data-prev="1">Zurück</button>
+              <button type="button" class="btn--next" data-next="3">Weiter</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Unterlagen & Absenden -->
+          <div class="wizard-step" data-step="3">
+            <h3 style="font-family:'Poppins',sans-serif;color:#0A1A5C;margin-bottom:1.5rem">Unterlagen & Absenden</h3>
+            <div class="field">
+              <label>Police oder Angebot (Foto oder PDF)</label>
+              <div class="file-upload" id="file-drop">
+                <input type="file" id="dateien" name="dateien" multiple accept=".pdf,.jpg,.jpeg,.png,.heic">
+                <p class="file-upload__label">Datei hier ablegen oder <strong>klicken</strong><br><small>PDF, JPG, PNG oder HEIC – max. 10 MB je Datei</small></p>
+              </div>
+              <div id="file-list" style="margin-top:.5rem;font-size:.85rem;color:#555"></div>
+            </div>
+            <div class="field">
+              <label class="consent-label">
+                <input type="checkbox" name="einwilligung" value="ja" required>
+                <span>Mit dem Absenden bestätige ich, dass ich die Prüfung meines Vertrags bzw. Angebots ausdrücklich wünsche und in die Verarbeitung der Daten zu diesem Zweck einwillige (jederzeit widerrufbar). Details in der <a href="/datenschutz/">Datenschutzerklärung</a>.</span>
+              </label>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn--back" data-prev="2">Zurück</button>
+              <button type="submit" class="btn--submit">Kostenlos prüfen lassen</button>
+            </div>
+          </div>
+        </form>
+
+        <script>
+        (function(){
+          const form=document.getElementById('vc-wizard');
+          const steps=form.querySelectorAll('.wizard-step');
+          const progSteps=document.querySelectorAll('.wizard-progress__step');
+          const progBar=document.querySelector('.wizard-progress__bar');
+          let current=1;
+          function show(n){
+            steps.forEach(s=>{s.classList.toggle('active',+s.dataset.step===n)});
+            progSteps.forEach((p,i)=>{p.classList.toggle('active',i+1===n);p.classList.toggle('done',i+1<n)});
+            progBar.style.width=((n-1)/(steps.length-1)*100)+'%';
+            form.scrollIntoView({behavior:'smooth',block:'start'});
+            current=n;
+          }
+          form.addEventListener('click',function(e){
+            const btn=e.target.closest('[data-next],[data-prev]');
+            if(!btn)return;
+            if(btn.dataset.next){
+              const step=form.querySelector('.wizard-step[data-step="'+current+'"]');
+              const required=step.querySelectorAll('[required]');
+              let valid=true;
+              required.forEach(inp=>{
+                const field=inp.closest('.field');
+                if(!inp.value.trim()||(inp.type==='email'&&!/^[^@]+@[^@]+\.[^@]+$/.test(inp.value))){
+                  if(field)field.classList.add('has-error');valid=false;
+                }else{if(field)field.classList.remove('has-error')}
+              });
+              if(valid)show(+btn.dataset.next);
+            }
+            if(btn.dataset.prev)show(+btn.dataset.prev);
+          });
+          const drop=document.getElementById('file-drop');
+          const fileInput=document.getElementById('dateien');
+          const fileList=document.getElementById('file-list');
+          drop.addEventListener('click',()=>fileInput.click());
+          drop.addEventListener('dragover',e=>{e.preventDefault();drop.style.borderColor='#0066CC'});
+          drop.addEventListener('dragleave',()=>{drop.style.borderColor='#ccc'});
+          drop.addEventListener('drop',e=>{e.preventDefault();drop.style.borderColor='#ccc';fileInput.files=e.dataTransfer.files;showFiles()});
+          fileInput.addEventListener('change',showFiles);
+          function showFiles(){
+            const f=fileInput.files;
+            fileList.innerHTML=[...f].map(x=>x.name+' ('+Math.round(x.size/1024)+' KB)').join('<br>');
+          }
+          form.addEventListener('submit',function(e){
+            const consent=form.querySelector('[name="einwilligung"]');
+            if(!consent.checked){e.preventDefault();alert('Bitte Einwilligung bestätigen.');return}
+            const honey=form.querySelector('[name="website"]');
+            if(honey&&honey.value){e.preventDefault();return}
+          });
+        })();
+        </script>
       </div>
     </section>
 

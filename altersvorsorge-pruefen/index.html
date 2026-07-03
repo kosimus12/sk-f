@@ -97,11 +97,335 @@
     
     <section class="section section--muted pruef-upload" id="fragen" aria-labelledby="fragen-title">
       <div class="container container--narrow">
-        <h2 id="fragen-title">Renten- &amp; Vorsorgeverträge prüfen lassen - in wenigen Minuten</h2>
-        <p class="section-head__sub">Beantworten Sie ein paar kurze Fragen zu Ihrem Vertrag oder Angebot. Ich melde mich mit einer ehrlichen Einschätzung bei Ihnen.</p>
-        <iframe class="pruef-upload__frame" data-tally-src="https://tally.so/r/jagMVa?thema=Renten-%20%26%20Vorsorgevertr%C3%A4ge&amp;transparentBackground=1&amp;dynamicHeight=1" loading="lazy" title="Fragen zum Vertragscheck beantworten"></iframe>
-        <script async src="https://tally.so/widgets/embed.js"></script>
-        <p class="pruef-upload__consent">Mit dem Absenden bestätigen Sie, dass Sie die Prüfung Ihres Vertrags bzw. Angebots ausdrücklich wünschst, und willigst in die Verarbeitung der angegebenen Daten zu diesem Zweck ein (jederzeit widerrufbar). Details in der <a href="/datenschutz/">Datenschutzerklärung</a>.</p>
+        <style>
+            .wizard-progress{display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem;position:relative}
+            .wizard-progress::before{content:"";position:absolute;top:50%;left:0;right:0;height:3px;background:#ddd;z-index:0;transform:translateY(-50%)}
+            .wizard-progress__bar{position:absolute;top:50%;left:0;height:3px;background:#0066CC;z-index:1;transform:translateY(-50%);transition:width .3s ease}
+            .wizard-progress__step{width:36px;height:36px;border-radius:50%;background:#ddd;color:#666;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;position:relative;z-index:2;transition:background .3s,color .3s}
+            .wizard-progress__step.active,.wizard-progress__step.done{background:#0066CC;color:#fff}
+            .wizard-progress__step.done{background:#0A1A5C}
+            .wizard-step{display:none}
+            .wizard-step.active{display:block}
+            .wizard-form label{display:block;font-weight:600;margin-bottom:.3rem;color:#333}
+            .wizard-form .field{margin-bottom:1.25rem}
+            .wizard-form input[type="text"],.wizard-form input[type="email"],.wizard-form input[type="tel"],.wizard-form input[type="date"],.wizard-form input[type="number"],.wizard-form select,.wizard-form textarea{width:100%;padding:.65rem .85rem;border:1px solid #ccc;border-radius:6px;font-size:1rem;font-family:inherit;transition:border-color .2s}
+            .wizard-form input:focus,.wizard-form select:focus,.wizard-form textarea:focus{outline:none;border-color:#0066CC;box-shadow:0 0 0 3px rgba(0,102,204,.12)}
+            .wizard-form textarea{min-height:100px;resize:vertical}
+            .wizard-form .field-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+            @media(max-width:600px){.wizard-form .field-row{grid-template-columns:1fr}}
+            .wizard-form .toggle-group{display:flex;gap:.5rem;margin-top:.3rem}
+            .wizard-form .toggle-btn{padding:.45rem 1.1rem;border:1px solid #ccc;border-radius:20px;background:#fff;cursor:pointer;font-size:.9rem;transition:all .2s}
+            .wizard-form .toggle-btn.selected{background:#0066CC;color:#fff;border-color:#0066CC}
+            .wizard-form .conditional{display:none;margin-top:.75rem;padding:.75rem;background:#f9f9f9;border-radius:6px;border:1px solid #eee}
+            .wizard-form .conditional.visible{display:block}
+            .wizard-nav{display:flex;justify-content:space-between;margin-top:2rem;gap:1rem}
+            .wizard-nav .btn{min-width:140px;text-align:center}
+            .btn--back{background:transparent;color:#0A1A5C;border:2px solid #0A1A5C;padding:.7rem 1.5rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:1rem;transition:background .2s,color .2s}
+            .btn--back:hover{background:#0A1A5C;color:#fff}
+            .range-wrap{position:relative;padding-top:.5rem}
+            .range-wrap input[type="range"]{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:linear-gradient(to right,#0066CC 0%,#ddd 0%);outline:none}
+            .range-wrap input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#0066CC;cursor:pointer;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+            .range-labels{display:flex;justify-content:space-between;font-size:.75rem;color:#666;margin-top:.3rem}
+            .range-value{text-align:center;font-weight:700;color:#0066CC;margin-top:.25rem}
+            .file-drop{border:2px dashed #ccc;border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color .2s,background .2s}
+            .file-drop:hover,.file-drop.dragover{border-color:#0066CC;background:rgba(0,102,204,.04)}
+            .file-drop input{display:none}
+            .file-drop__label{color:#666;font-size:.95rem}
+            .file-drop__label strong{color:#0066CC}
+            .consent-label{display:flex!important;align-items:flex-start;gap:.6rem;font-weight:400!important;line-height:1.5;font-size:.9rem;color:#555}
+            .consent-label input{margin-top:.25rem;flex-shrink:0;width:18px;height:18px;accent-color:#0066CC}
+            .wizard-form .error-msg{color:#c0392b;font-size:.82rem;margin-top:.25rem;display:none}
+            .wizard-form .has-error input,.wizard-form .has-error select{border-color:#c0392b}
+            .wizard-form .has-error .error-msg{display:block}
+            .btn--cta{background:#C8A24B;color:#fff;border:none;padding:.8rem 2rem;border-radius:6px;font-size:1.05rem;font-weight:700;cursor:pointer;transition:background .2s}
+            .btn--cta:hover{background:#F0B429}
+        </style>
+
+        <h2 id="fragen-title">Altersvorsorge pr&uuml;fen lassen &ndash; in wenigen Minuten</h2>
+        <p class="section-head__sub">Beantworten Sie ein paar kurze Fragen zu Ihrem Vertrag oder Angebot. Ich melde mich mit einer ehrlichen Einsch&auml;tzung bei Ihnen.</p>
+
+        <div class="wizard-progress" aria-hidden="true">
+            <div class="wizard-progress__bar" style="width:0%"></div>
+            <span class="wizard-progress__step active">1</span>
+            <span class="wizard-progress__step">2</span>
+            <span class="wizard-progress__step">3</span>
+        </div>
+
+        <form class="wizard-form" id="altersvorsorgeForm" method="POST" enctype="multipart/form-data" action="https://vertragscheck.sk-finanzberatung.de/upload" novalidate>
+            <input type="hidden" name="token" value="sk-vc-2026-sicher-a61c0f43de5846e2">
+            <input type="hidden" name="thema" value="Altersvorsorge">
+            <div style="position:absolute;left:-9999px" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off"></div>
+
+            <!-- Step 1: Persoenliche Angaben -->
+            <div class="wizard-step active" data-step="1">
+                <div class="field-row">
+                    <div class="field">
+                        <label for="vorname">Vorname *</label>
+                        <input type="text" id="vorname" name="vorname" required>
+                        <span class="error-msg">Bitte Vornamen eingeben.</span>
+                    </div>
+                    <div class="field">
+                        <label for="nachname">Nachname *</label>
+                        <input type="text" id="nachname" name="nachname" required>
+                        <span class="error-msg">Bitte Nachnamen eingeben.</span>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="email">E-Mail *</label>
+                        <input type="email" id="email" name="email" required>
+                        <span class="error-msg">Bitte g&uuml;ltige E-Mail eingeben.</span>
+                    </div>
+                    <div class="field">
+                        <label for="telefon">Telefon *</label>
+                        <input type="tel" id="telefon" name="telefon" required>
+                        <span class="error-msg">Bitte Telefonnummer eingeben.</span>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="geburtsdatum">Geburtsdatum</label>
+                        <input type="date" id="geburtsdatum" name="geburtsdatum">
+                    </div>
+                    <div class="field">
+                        <label for="beruf">Beruf / Status</label>
+                        <select id="beruf" name="beruf">
+                            <option value="">Bitte w&auml;hlen</option>
+                            <option value="Angestellt">Angestellt</option>
+                            <option value="Beamter/Anwärter">Beamter / Anw&auml;rter</option>
+                            <option value="Student">Student</option>
+                            <option value="Selbstständig">Selbstst&auml;ndig</option>
+                            <option value="Sonstiges">Sonstiges</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="familienstand">Familienstand</label>
+                        <select id="familienstand" name="familienstand">
+                            <option value="">Bitte w&auml;hlen</option>
+                            <option value="ledig">Ledig</option>
+                            <option value="verheiratet">Verheiratet</option>
+                            <option value="Partnerschaft">Partnerschaft</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="nettoeinkommen">Monatliches Nettoeinkommen (&euro;)</label>
+                        <input type="number" id="nettoeinkommen" name="nettoeinkommen" min="0" step="100" placeholder="z.B. 2500">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Kinder?</label>
+                    <div class="toggle-group" data-toggle="kinder">
+                        <button type="button" class="toggle-btn" data-value="ja">Ja</button>
+                        <button type="button" class="toggle-btn" data-value="nein">Nein</button>
+                    </div>
+                    <input type="hidden" name="kinder" id="kinder" value="">
+                    <div class="conditional" id="kinder-details">
+                        <label for="kinder_details">Anzahl &amp; Alter</label>
+                        <input type="text" id="kinder_details" name="kinder_details" placeholder="z.B. 2 Kinder, 3 und 6 Jahre">
+                    </div>
+                </div>
+                <div class="wizard-nav">
+                    <span></span>
+                    <button type="button" class="btn btn--cta wizard-next">Weiter &rarr;</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Altersvorsorge -->
+            <div class="wizard-step" data-step="2">
+                <div class="field-row">
+                    <div class="field">
+                        <label for="sparrate">Geplante Sparrate / Monat (&euro;)</label>
+                        <input type="number" id="sparrate" name="sparrate" min="0" step="25" placeholder="z.B. 200">
+                    </div>
+                    <div class="field">
+                        <label for="vermoegen">Vorhandenes Verm&ouml;gen (&euro;)</label>
+                        <input type="number" id="vermoegen" name="vermoegen" min="0" step="1000" placeholder="z.B. 15000">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="anlageziel">Anlageziel</label>
+                        <input type="text" id="anlageziel" name="anlageziel" placeholder="z.B. Altersvorsorge, Immobilie">
+                    </div>
+                    <div class="field">
+                        <label for="zeithorizont">Zeithorizont (Jahre)</label>
+                        <input type="number" id="zeithorizont" name="zeithorizont" min="1" max="60" placeholder="z.B. 25">
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="risiko">Risikobereitschaft</label>
+                    <div class="range-wrap">
+                        <input type="range" id="risiko" name="risiko" min="1" max="5" value="3">
+                        <div class="range-labels">
+                            <span>1 – sehr konservativ</span>
+                            <span>5 – sehr risikofreudig</span>
+                        </div>
+                        <div class="range-value">3 – ausgewogen</div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Bestehende Depots / Sparpl&auml;ne?</label>
+                    <div class="toggle-group" data-toggle="depots">
+                        <button type="button" class="toggle-btn" data-value="ja">Ja</button>
+                        <button type="button" class="toggle-btn" data-value="nein">Nein</button>
+                    </div>
+                    <input type="hidden" name="depots" id="depots" value="">
+                    <div class="conditional" id="depots-details">
+                        <label for="depots_welche">Welche?</label>
+                        <input type="text" id="depots_welche" name="depots_welche" placeholder="z.B. ETF-Sparplan bei Trade Republic">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Einmalanlage geplant?</label>
+                    <div class="toggle-group" data-toggle="einmalanlage">
+                        <button type="button" class="toggle-btn" data-value="ja">Ja</button>
+                        <button type="button" class="toggle-btn" data-value="nein">Nein</button>
+                    </div>
+                    <input type="hidden" name="einmalanlage" id="einmalanlage" value="">
+                    <div class="conditional" id="einmalanlage-details">
+                        <label for="einmalanlage_betrag">Betrag (&euro;)</label>
+                        <input type="number" id="einmalanlage_betrag" name="einmalanlage_betrag" min="0" step="500" placeholder="z.B. 10000">
+                    </div>
+                </div>
+                <div class="wizard-nav">
+                    <button type="button" class="btn--back wizard-prev">&larr; Zur&uuml;ck</button>
+                    <button type="button" class="btn btn--cta wizard-next">Weiter &rarr;</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Unterlagen & Absenden -->
+            <div class="wizard-step" data-step="3">
+                <div class="field">
+                    <label>Police oder Angebot (Foto oder PDF)</label>
+                    <div class="file-drop" id="fileDrop">
+                        <input type="file" id="dateien" name="dateien" multiple accept=".pdf,.jpg,.jpeg,.png,.heic">
+                        <p class="file-drop__label"><strong>Dateien hier ablegen</strong> oder klicken zum Ausw&auml;hlen<br><small>PDF, JPG, PNG, HEIC &ndash; mehrere m&ouml;glich</small></p>
+                    </div>
+                    <div id="fileList" style="margin-top:.5rem;font-size:.85rem;color:#555"></div>
+                </div>
+                <div class="field">
+                    <label for="anmerkungen">Anmerkungen</label>
+                    <textarea id="anmerkungen" name="anmerkungen" placeholder="Worauf sollen wir besonders achten?"></textarea>
+                </div>
+                <div class="field">
+                    <label class="consent-label">
+                        <input type="checkbox" id="einwilligung" name="einwilligung" value="ja" required>
+                        <span>Ich w&uuml;nsche ausdr&uuml;cklich die kostenlose Pr&uuml;fung meiner hochgeladenen Unterlagen durch SK-Finanzberatung (Simon Kuper) und willige in die Verarbeitung der Daten zu diesem Zweck ein. Mir ist bekannt, dass ich diese Einwilligung jederzeit widerrufen kann. Details in der <a href="/datenschutz/">Datenschutzerkl&auml;rung</a>.</span>
+                    </label>
+                    <span class="error-msg" id="consent-error">Bitte Einwilligung best&auml;tigen.</span>
+                </div>
+                <div class="wizard-nav">
+                    <button type="button" class="btn--back wizard-prev">&larr; Zur&uuml;ck</button>
+                    <button type="submit" class="btn btn--cta">Kostenlos pr&uuml;fen lassen</button>
+                </div>
+            </div>
+        </form>
+
+        <script>
+        (function(){
+            const form=document.getElementById('altersvorsorgeForm');
+            const steps=form.querySelectorAll('.wizard-step');
+            const progressSteps=document.querySelectorAll('.wizard-progress__step');
+            const progressBar=document.querySelector('.wizard-progress__bar');
+            let current=0;
+
+            function showStep(idx){
+                steps.forEach((s,i)=>{s.classList.toggle('active',i===idx)});
+                progressSteps.forEach((s,i)=>{
+                    s.classList.remove('active','done');
+                    if(i<idx)s.classList.add('done');
+                    if(i===idx)s.classList.add('active');
+                });
+                progressBar.style.width=(idx/(steps.length-1)*100)+'%';
+                current=idx;
+            }
+
+            function validateStep(idx){
+                const step=steps[idx];
+                let valid=true;
+                step.querySelectorAll('[required]').forEach(el=>{
+                    const field=el.closest('.field')||el.parentElement;
+                    if(el.type==='checkbox'){
+                        if(!el.checked){valid=false;const em=document.getElementById('consent-error');if(em)em.style.display='block';}
+                        return;
+                    }
+                    if(!el.value.trim()||(el.type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value))){
+                        valid=false;if(field)field.classList.add('has-error');
+                    }else{if(field)field.classList.remove('has-error');}
+                });
+                return valid;
+            }
+
+            form.addEventListener('click',function(e){
+                if(e.target.closest('.wizard-next')){
+                    if(validateStep(current))showStep(current+1);
+                }
+                if(e.target.closest('.wizard-prev')){
+                    showStep(current-1);
+                }
+            });
+
+            // Toggles
+            form.querySelectorAll('.toggle-group').forEach(group=>{
+                const key=group.dataset.toggle;
+                const hidden=document.getElementById(key);
+                const cond=document.getElementById(key+'-details');
+                group.querySelectorAll('.toggle-btn').forEach(btn=>{
+                    btn.addEventListener('click',function(){
+                        group.querySelectorAll('.toggle-btn').forEach(b=>b.classList.remove('selected'));
+                        btn.classList.add('selected');
+                        hidden.value=btn.dataset.value;
+                        if(cond)cond.classList.toggle('visible',btn.dataset.value==='ja');
+                    });
+                });
+            });
+
+            // Range slider
+            const range=document.getElementById('risiko');
+            const rangeVal=form.querySelector('.range-value');
+            const labels=['','sehr konservativ','konservativ','ausgewogen','risikofreudig','sehr risikofreudig'];
+            function updateRange(){
+                const v=range.value;
+                const pct=((v-1)/4)*100;
+                range.style.background='linear-gradient(to right,#0066CC '+pct+'%,#ddd '+pct+'%)';
+                rangeVal.textContent=v+' – '+labels[v];
+            }
+            range.addEventListener('input',updateRange);
+            updateRange();
+
+            // File drop
+            const drop=document.getElementById('fileDrop');
+            const fileInput=document.getElementById('dateien');
+            const fileList=document.getElementById('fileList');
+            drop.addEventListener('click',()=>fileInput.click());
+            drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragover')});
+            drop.addEventListener('dragleave',()=>drop.classList.remove('dragover'));
+            drop.addEventListener('drop',e=>{
+                e.preventDefault();drop.classList.remove('dragover');
+                fileInput.files=e.dataTransfer.files;
+                showFiles();
+            });
+            fileInput.addEventListener('change',showFiles);
+            function showFiles(){
+                const f=fileInput.files;
+                fileList.innerHTML=[...f].map(x=>x.name+' ('+Math.round(x.size/1024)+' KB)').join('<br>');
+            }
+
+            // Clear errors on input
+            form.addEventListener('input',function(e){
+                const field=e.target.closest('.field');
+                if(field)field.classList.remove('has-error');
+                if(e.target.id==='einwilligung'){document.getElementById('consent-error').style.display='none';}
+            });
+
+            // Submit validation
+            form.addEventListener('submit',function(e){
+                if(!validateStep(current))e.preventDefault();
+            });
+        })();
+        </script>
       </div>
     </section>
 
