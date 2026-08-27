@@ -79,10 +79,34 @@ das Control-Token** aus. Das ist der Generalschlüssel — sicher ablegen
 
 Danach TLS über Caddy davor:
 
+Zuerst prüfen, ob Port 80/443 schon belegt ist:
+
 ```bash
-sudo apt install -y caddy
+sudo ss -lntp | grep -E ':80 |:443 '
+```
+
+**Ist dort nichts** — Caddy aus dem offiziellen Repo installieren (in Ubuntus
+Standardquellen ist es nicht enthalten):
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
 sudo cp hub/deploy/Caddyfile /etc/caddy/Caddyfile   # Hostnamen anpassen!
 sudo systemctl reload caddy
+```
+
+**Läuft dort schon nginx**, kein Caddy installieren — stattdessen einen
+vhost anlegen (`hub/deploy/nginx-hub.conf` als Vorlage) und
+`certbot --nginx -d hub.DEINE-DOMAIN.de` laufen lassen.
+
+Gegenprobe:
+
+```bash
 curl -s https://hub.DEINE-DOMAIN.de/healthz
 ```
 

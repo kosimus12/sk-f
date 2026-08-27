@@ -72,12 +72,28 @@ taucht nie wieder auf.
 TLS davor:
 
 ```bash
-sudo apt install -y caddy
+# 1. Ist Port 80/443 schon belegt?
+sudo ss -lntp | grep -E ':80 |:443 '
+
+# 2a. Nichts belegt -> Caddy aus dem offiziellen Repo (nicht in Ubuntu enthalten):
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
 sudo cp hub/deploy/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile          # hub.example.de → deine Subdomain
+sudo nano /etc/caddy/Caddyfile          # hub.example.de -> deine Subdomain
 sudo systemctl reload caddy
 
-curl -s https://hub.DEINE-DOMAIN.de/healthz     # {"ok":true,...}
+# 2b. nginx laeuft schon -> kein Caddy, stattdessen vhost:
+#   sudo cp hub/deploy/nginx-hub.conf /etc/nginx/sites-available/skconnector-hub
+#   sudo ln -s /etc/nginx/sites-available/skconnector-hub /etc/nginx/sites-enabled/
+#   sudo nano /etc/nginx/sites-available/skconnector-hub    # Hostnamen eintragen
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d hub.DEINE-DOMAIN.de
+
+curl -s https://hub.DEINE-DOMAIN.de/healthz
 ```
 
 Für alle weiteren Befehle auf dem Server:
@@ -110,15 +126,21 @@ cd ~/src/sk-f
 git checkout claude/hetzner-multi-device-connector-ply62n
 cd connector
 
-sudo bash agent/macos/install.sh \
-     --hub https://hub.DEINE-DOMAIN.de \
-     --code skc_enr_... \
-     --keep-awake
+bash agent/macos/setup-mac.sh --hub https://hub.DEINE-DOMAIN.de --code skc_enr_...
 ```
 
-`--keep-awake` setzt die Energieeinstellungen so, dass der Mac am Netzteil nicht
-einschläft (Display darf aus). Bei einem MacBook, das mit geschlossenem Deckel
-am Strom hängt, stattdessen `--keep-awake-aggressive`.
+**Ohne `sudo` starten** — das Skript fragt selbst nach, wo es root braucht. Mit
+`sudo` davor laufen die Freigabe-Dialoge im falschen Benutzerkontext und
+erscheinen nicht.
+
+`setup-mac.sh` erledigt Installation, Energieeinstellungen und Freigaben in
+einem Durchgang. Für den **zugeklappten** Betrieb setzt es `disablesleep=1` —
+`sleep 0` allein reicht nicht, damit schläft der Mac beim Zuklappen trotzdem
+ein — und prüft danach über `pmset -g live` nach, ob der Wert wirklich gegriffen
+hat. Voraussetzung bleibt: **Netzteil angeschlossen lassen.**
+
+Die Schritte 2.3 und 2.4 unten laufen dabei automatisch mit; sie stehen hier
+noch einmal einzeln, falls du etwas nachziehen musst.
 
 ### 2.3 Auf dem Mac: Freigaben erteilen — **ohne sudo, am Mac selbst**
 
@@ -196,10 +218,7 @@ git clone https://github.com/kosimus12/sk-f ~/src/sk-f
 cd ~/src/sk-f && git checkout claude/hetzner-multi-device-connector-ply62n
 cd connector
 
-sudo bash agent/macos/install.sh \
-     --hub https://hub.DEINE-DOMAIN.de --code skc_enr_... --keep-awake
-
-bash agent/macos/grant-permissions.sh      # ohne sudo, Dialoge bestätigen
+bash agent/macos/setup-mac.sh --hub https://hub.DEINE-DOMAIN.de --code skc_enr_...
 ```
 
 Dann Schritt 2.4 (JavaScript + Festplattenvollzugriff) und 2.5 (Gegenprobe)
