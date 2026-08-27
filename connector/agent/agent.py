@@ -185,6 +185,57 @@ def screen_locked() -> bool | None:
     return None
 
 
+def parse_pmset(text: str) -> dict[str, int]:
+    """Zieht die Schlaf-Einstellungen aus der Ausgabe von 'pmset -g custom'.
+
+    Nur der Block 'AC Power' zaehlt: der Mac soll am Netzteil wach bleiben,
+    im Akkubetrieb ist Schlafen richtig.
+    """
+    interessant = ("disablesleep", "sleep", "displaysleep", "disksleep",
+                   "womp", "powernap", "standby", "lidwake", "ttyskeepawake")
+    werte: dict[str, int] = {}
+    in_ac = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("AC Power"):
+            in_ac = True
+            continue
+        if stripped.startswith("Battery Power"):
+            in_ac = False
+            continue
+        if not in_ac:
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2 and parts[0] in interessant:
+            try:
+                werte[parts[0]] = int(parts[1])
+            except ValueError:
+                pass
+    return werte
+
+
+def sleep_settings() -> dict:
+    """Beantwortet: bleibt dieser Mac zugeklappt und gesperrt erreichbar?"""
+    raw = _run_ok(["pmset", "-g", "custom"]) or ""
+    werte = parse_pmset(raw)
+    if not werte:
+        return {"lesbar": False}
+
+    # 'disablesleep 1' ist der einzige Schalter, der auch bei geschlossenem
+    # Deckel wirkt. 'sleep 0' allein reicht nicht - Zuklappen schlaeft trotzdem.
+    zugeklappt_ok = werte.get("disablesleep") == 1
+    return {
+        "lesbar": True,
+        "werte": werte,
+        "bleibt_wach_am_netzteil": werte.get("sleep") == 0 or zugeklappt_ok,
+        "bleibt_wach_zugeklappt": zugeklappt_ok,
+        "hinweis": None if zugeklappt_ok else (
+            "Zugeklappt schlaeft dieser Mac ein. Beheben mit: "
+            "sudo pmset -a disablesleep 1"
+        ),
+    }
+
+
 def battery() -> dict | None:
     if not shutil.which("pmset"):
         return None
@@ -216,6 +267,7 @@ def gather_facts() -> dict:
         user, _uid = console_user()
         facts["console_user"] = user
         facts["screen_locked"] = screen_locked()
+        facts["sleep"] = sleep_settings()
     bat = battery()
     if bat:
         facts["battery"] = bat

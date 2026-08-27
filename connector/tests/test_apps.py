@@ -132,6 +132,49 @@ def test_parse_records_tolerates_missing_fields(agent):
 
 
 # ---------------------------------------------------------------------------
+# Schlaf-Einstellungen (zugeklappter Betrieb)
+# ---------------------------------------------------------------------------
+
+PMSET_AUS = """System-wide power settings:
+Currently in use:
+ standby              1
+Battery Power:
+ lidwake              1
+ disablesleep         0
+ sleep                20
+ displaysleep         2
+AC Power:
+ lidwake              1
+ disablesleep         1
+ sleep                0
+ displaysleep         5
+ disksleep            0
+ womp                 1
+ powernap             1
+"""
+
+
+def test_pmset_reads_only_the_ac_block(agent):
+    """Im Akkubetrieb ist Schlafen richtig - nur das Netzteil zaehlt."""
+    werte = agent.parse_pmset(PMSET_AUS)
+    assert werte["disablesleep"] == 1      # AC-Wert, nicht der Akku-Wert 0
+    assert werte["sleep"] == 0             # AC-Wert, nicht 20
+    assert werte["womp"] == 1
+
+
+def test_closed_lid_needs_disablesleep_not_just_sleep_zero(agent):
+    """'sleep 0' allein reicht nicht - Zuklappen schlaeft trotzdem ein."""
+    nur_sleep_null = PMSET_AUS.replace(" disablesleep         1", " disablesleep         0")
+    ergebnis = agent.parse_pmset(nur_sleep_null)
+    assert ergebnis["disablesleep"] == 0
+    assert ergebnis["sleep"] == 0
+
+
+def test_pmset_without_ac_block_is_reported_as_unreadable(agent):
+    assert agent.parse_pmset("irgendwas ohne Bloecke") == {}
+
+
+# ---------------------------------------------------------------------------
 # Rollen und Faehigkeiten
 # ---------------------------------------------------------------------------
 
