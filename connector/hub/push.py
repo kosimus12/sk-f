@@ -74,9 +74,17 @@ def _kind(url: str) -> str:
 
 
 def _header_safe(value: str) -> str:
-    """HTTP-Header duerfen nur ASCII enthalten - Umlaute umschreiben."""
+    """Macht einen Text als HTTP-Header-Wert unschaedlich.
+
+    Zwei Dinge: HTTP-Header duerfen nur ASCII enthalten (Umlaute umschreiben),
+    und Zeilenumbrueche muessen raus. Ein Titel mit CR/LF koennte sonst
+    zusaetzliche Header einschleusen - Pythons http.client faengt das zwar mit
+    einem ValueError ab, aber dann scheitert die Zustellung still statt sauber.
+    """
     replacements = {"ä": "ae", "ö": "oe", "ü": "ue", "Ä": "Ae", "Ö": "Oe",
                     "Ü": "Ue", "ß": "ss"}
     for src, dst in replacements.items():
         value = value.replace(src, dst)
-    return value.encode("ascii", "replace").decode("ascii")
+    # Alle Steuerzeichen inklusive CR/LF und Tab durch Leerzeichen ersetzen.
+    value = "".join(" " if ord(c) < 32 or ord(c) == 127 else c for c in value)
+    return value.encode("ascii", "replace").decode("ascii")[:200]

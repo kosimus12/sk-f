@@ -142,6 +142,10 @@ def create_device(req: EnrollRequest, actor: str = Depends(require_control)) -> 
     unknown = set(req.capabilities) - set(security.KIND_CAPABILITY.values())
     if unknown:
         raise HTTPException(400, f"unbekannte Faehigkeiten: {sorted(unknown)}")
+    if req.push_url:
+        verdict = security.check_push_url(req.push_url)
+        if not verdict.allowed:
+            raise HTTPException(400, f"Push-URL abgelehnt: {verdict.reason}")
     existing = store.get_device(req.device_id)
     if existing is None:
         store.create_device(
@@ -183,8 +187,15 @@ def patch_device(device_id: str, req: DeviceUpdate, actor: str = Depends(require
     if store.get_device(device_id) is None:
         raise HTTPException(404, "unbekanntes Geraet")
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
+    if fields.get("push_url"):
+        verdict = security.check_push_url(str(fields["push_url"]))
+        if not verdict.allowed:
+            raise HTTPException(400, f"Push-URL abgelehnt: {verdict.reason}")
     device = store.update_device(device_id, **fields)
-    store.audit(actor, "device.update", device_id, **fields)
+    # Die Push-URL ist ein Geheimnis - Pushcut-URLs enthalten den API-Key.
+    # Ins Log gehoert nur, DASS sie geaendert wurde, nicht worauf.
+    protokoll = {k: ("<gesetzt>" if k == "push_url" else v) for k, v in fields.items()}
+    store.audit(actor, "device.update", device_id, **protokoll)
     return device  # type: ignore[return-value]
 
 

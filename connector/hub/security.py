@@ -123,10 +123,45 @@ DENY_PATTERNS: tuple[tuple[str, str], ...] = (
 _COMPILED_DENY = tuple((re.compile(p, re.IGNORECASE), why) for p, why in DENY_PATTERNS)
 
 
+#: Obergrenze fuer 'fs.write' - ohne sie fuellt ein Kommando die Platte.
+MAX_WRITE_CHARS = 1_000_000
+
+
 @dataclass(frozen=True)
 class PolicyResult:
     allowed: bool
     reason: str = ""
+
+
+#: Adressen, an die der Hub niemals eine Push-Mitteilung schickt.
+#: 169.254.169.254 ist der Metadaten-Dienst der meisten Cloud-Anbieter -
+#: eine Push-URL dorthin waere ein bequemer Weg, Zugangsdaten abzuziehen.
+_PUSH_VERBOTEN = ("169.254.", "[fd00:ec2::254]", "metadata.google.internal")
+
+
+def check_push_url(url: str) -> PolicyResult:
+    """Prueft eine Push-URL, bevor der Hub selbst dorthin POSTet.
+
+    Der Hub ruft diese URL serverseitig auf - eine beliebige Adresse waere
+    damit ein Server-Side-Request-Forgery-Werkzeug. Private Netze bleiben
+    erlaubt, weil ein selbst gehostetes ntfy typischerweise dort liegt; der
+    Cloud-Metadatendienst nicht.
+    """
+    value = url.strip()
+    if not value:
+        return PolicyResult(False, "leere Push-URL")
+    if len(value) > 500:
+        return PolicyResult(False, "Push-URL laenger als 500 Zeichen")
+    if not value.lower().startswith(("http://", "https://")):
+        return PolicyResult(False, "Push-URL muss mit http:// oder https:// beginnen")
+    if any(c in value for c in "\r\n\t \x00"):
+        return PolicyResult(False, "Push-URL enthaelt unzulaessige Zeichen")
+    host = value.split("://", 1)[1].split("/", 1)[0].lower()
+    if "@" in host:
+        return PolicyResult(False, "Zugangsdaten in der Push-URL sind nicht erlaubt")
+    if any(host.startswith(b) or host == b for b in _PUSH_VERBOTEN):
+        return PolicyResult(False, f"Push-URL zeigt auf einen gesperrten Host ({host})")
+    return PolicyResult(True)
 
 
 def check_shell(command: str, allowlist: list[str] | None = None) -> PolicyResult:
@@ -181,6 +216,13 @@ def check_command(
             return PolicyResult(False, "'path' fehlt")
         if "\x00" in path:
             return PolicyResult(False, "ungueltiger Pfad")
+    if kind == "fs.write":
+        # Ohne Grenze kann ein einzelnes Kommando die Platte des Geraets
+        # fuellen. 1 MiB reicht fuer alles, was sinnvoll per Kommando geht;
+        # groessere Dateien gehoeren ueber die Shell und einen Download.
+        if len(str(payload.get("content", ""))) > MAX_WRITE_CHARS:
+            return PolicyResult(
+                False, f"Inhalt groesser als {MAX_WRITE_CHARS} Zeichen")
     if kind.startswith("browser."):
         return _check_browser(kind, payload)
     if kind.startswith("mail."):

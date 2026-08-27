@@ -451,8 +451,11 @@ def run_notify(payload: dict) -> dict:
     user, uid = console_user()
     if uid is None:
         return {"delivered": False, "note": "niemand angemeldet - Meldung nicht zustellbar"}
+    # as_literal statt json.dumps: JSON- und AppleScript-Escaping sehen
+    # aehnlich aus, sind aber nicht dasselbe. Ueberall dieselbe Funktion zu
+    # benutzen ist der einzige Weg, der sich pruefen laesst.
     script = (
-        f'display notification {json.dumps(message)} with title {json.dumps(title)}'
+        f'display notification {as_literal(message)} with title {as_literal(title)}'
     )
     argv = ["/usr/bin/osascript", "-e", script]
     if os.getuid() == 0:

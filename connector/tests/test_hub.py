@@ -388,3 +388,81 @@ def test_device_id_is_validated(client):
 
 def test_healthz_needs_no_auth(client):
     assert client.get("/healthz").json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Sicherheitspruefung: Befunde aus der Due Diligence
+# ---------------------------------------------------------------------------
+
+def test_fs_write_size_is_capped():
+    """Ohne Grenze fuellt ein einzelnes Kommando die Platte des Geraets."""
+    gross = {"path": "/tmp/x", "content": "A" * (security.MAX_WRITE_CHARS + 1)}
+    verdict = security.check_command("fs.write", "full", ["fs"], gross)
+    assert not verdict.allowed and "groesser" in verdict.reason
+    klein = {"path": "/tmp/x", "content": "A" * 1000}
+    assert security.check_command("fs.write", "full", ["fs"], klein).allowed
+
+
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd",
+    "gopher://intern/",
+    "http://169.254.169.254/latest/meta-data/",
+    "https://user:pass@ntfy.example.de/topic",
+    "https://ntfy.example.de/topic\r\nX-Injected: ja",
+    "",
+    "ntfy.example.de/topic",
+])
+def test_push_url_rejects_ssrf_and_junk(url):
+    """Der Hub POSTet selbst an diese URL - sie ist ein SSRF-Werkzeug."""
+    assert not security.check_push_url(url).allowed, url
+
+
+@pytest.mark.parametrize("url", [
+    "https://ntfy.sk-finanzberatung.de/simon-4f9a2c",
+    "http://192.168.1.10:8080/topic",          # selbst gehostetes ntfy im LAN
+    "https://api.pushcut.io/GEHEIM/notifications/claude",
+])
+def test_push_url_allows_real_targets(url):
+    assert security.check_push_url(url).allowed, url
+
+
+def test_push_url_is_validated_by_the_api(client):
+    resp = client.post("/v1/devices", json={
+        "device_id": "iphone-x", "label": "X", "platform": "ios",
+        "capabilities": ["notify"],
+        "push_url": "http://169.254.169.254/latest/meta-data/",
+    }, headers=ctl())
+    assert resp.status_code == 400
+    assert "Push-URL abgelehnt" in resp.json()["error"]
+
+
+def test_push_url_never_lands_in_the_audit_log(client):
+    """Pushcut-URLs enthalten den API-Key - der gehoert nicht ins Protokoll."""
+    geheim = "https://api.pushcut.io/SUPERGEHEIM/notifications/claude"
+    make_device(client, "iphone-y", platform="ios", mode="notify", caps=("notify",),
+                push_url="https://ntfy.example.de/y")
+    client.patch("/v1/devices/iphone-y", json={"push_url": geheim}, headers=ctl())
+    roh = client.get("/v1/audit", headers=ctl()).text
+    assert "SUPERGEHEIM" not in roh
+    assert "<gesetzt>" in roh
+
+
+def test_header_injection_via_notification_title():
+    from hub.push import _header_safe
+    raus = _header_safe("Titel\r\nX-Injected: ja")
+    assert "\r" not in raus and "\n" not in raus
+
+
+def test_applescript_shell_scan_is_documented_as_best_effort():
+    """Der Scan faengt Literale - eine Variable als Argument nicht.
+
+    Das ist bewusst so: eine vollstaendige AppleScript-Analyse waere ein
+    eigener Parser. Der Test haelt die Luecke sichtbar, statt sie zu
+    verschweigen - 'app.applescript' bleibt ein Modus-'full'-Werkzeug.
+    """
+    umgehung = 'set c to "rm -rf /"\ndo shell script c'
+    assert security.check_command(
+        "app.applescript", "full", ["app"], {"script": umgehung}).allowed
+    direkt = 'do shell script "rm -rf /"'
+    assert not security.check_command(
+        "app.applescript", "full", ["app"], {"script": direkt}).allowed
