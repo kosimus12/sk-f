@@ -175,6 +175,36 @@ def test_pmset_without_ac_block_is_reported_as_unreadable(agent):
 
 
 # ---------------------------------------------------------------------------
+# Sperrstatus
+# ---------------------------------------------------------------------------
+
+IOREG_GESPERRT = """<?xml version="1.0"?>
+<plist version="1.0"><dict>
+  <key>IOConsoleUsers</key>
+  <array><dict>
+    <key>kCGSSessionUserNameKey</key><string>skuper</string>
+    <key>CGSSessionScreenIsLocked</key><true/>
+  </dict></array>
+</dict></plist>"""
+
+IOREG_OFFEN = """<?xml version="1.0"?>
+<plist version="1.0"><dict>
+  <key>IOConsoleUsers</key>
+  <array><dict>
+    <key>kCGSSessionUserNameKey</key><string>skuper</string>
+  </dict></array>
+</dict></plist>"""
+
+
+def test_lock_state_is_read_from_ioreg(agent):
+    assert agent.parse_ioreg_lock(IOREG_GESPERRT) is True
+    # Fehlender Schluessel heisst offen - macOS setzt ihn nur beim Sperren.
+    assert agent.parse_ioreg_lock(IOREG_OFFEN) is False
+    assert agent.parse_ioreg_lock(
+        IOREG_GESPERRT.replace("<true/>", "<false/>")) is False
+
+
+# ---------------------------------------------------------------------------
 # Rollen und Faehigkeiten
 # ---------------------------------------------------------------------------
 

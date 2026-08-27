@@ -163,26 +163,41 @@ def console_user() -> tuple[str | None, int | None]:
         return None, None
 
 
+def parse_ioreg_lock(text: str) -> bool | None:
+    """Liest den Sperrstatus aus der Plist-Ausgabe von 'ioreg -n Root -d1 -a'.
+
+    macOS setzt CGSSessionScreenIsLocked nur, WENN gesperrt ist - fehlt der
+    Schluessel, ist der Bildschirm offen.
+    """
+    idx = text.find("CGSSessionScreenIsLocked")
+    if idx == -1:
+        return False
+    fenster = text[idx:idx + 200]
+    if "<true/>" in fenster:
+        return True
+    if "<false/>" in fenster:
+        return False
+    return None
+
+
 def screen_locked() -> bool | None:
-    """Ist der Bildschirm gesperrt? None, wenn nicht ermittelbar."""
+    """Ist der Bildschirm gesperrt? None, wenn nicht ermittelbar.
+
+    Ueber ioreg statt ueber Quartz: Apples /usr/bin/python3 bringt kein
+    PyObjC mit, der Import scheiterte auf jedem echten Mac still. ioreg
+    braucht kein Modul und funktioniert auch im root-Daemon.
+    """
     if platform.system() != "Darwin":
         return None
-    user, uid = console_user()
+    _user, uid = console_user()
     if uid is None:
         return True  # Login-Fenster == gesperrt
     try:
-        out = subprocess.run(
-            ["/bin/launchctl", "asuser", str(uid), "/usr/bin/python3", "-c",
-             "import Quartz,sys;d=Quartz.CGSessionCopyCurrentDictionary();"
-             "print(bool(d and d.get('CGSSessionScreenIsLocked',0)))"],
-            capture_output=True, text=True, timeout=8,
-        )
-        val = out.stdout.strip()
-        if val in ("True", "False"):
-            return val == "True"
+        out = subprocess.run(["/usr/sbin/ioreg", "-n", "Root", "-d1", "-a"],
+                             capture_output=True, text=True, timeout=10)
+        return parse_ioreg_lock(out.stdout)
     except Exception:
-        pass
-    return None
+        return None
 
 
 def parse_pmset(text: str) -> dict[str, int]:
