@@ -45,73 +45,39 @@ Jedes abgestufte Token taucht im Audit-Log unter seinem Namen auf
 python3 tools/skconnect.py token-revoke chat
 ```
 
-## Einrichtung auf dem Hetzner
-
-### 1. Token ausstellen und ablegen
+## Einrichtung auf dem Hetzner — ein Befehl
 
 ```bash
-cd /opt/src/sk-f/connector
-export CONNECTOR_HUB_URL=https://hub.138.199.230.178.sslip.io
-export CONNECTOR_CONTROL_TOKEN="$(grep -oP '(?<=CONNECTOR_CONTROL_TOKEN=).*' /etc/skconnector/hub.env)"
-
-python3 tools/skconnect.py token-issue chat --ceiling readonly
+cd /opt/src/sk-f && git pull && cd connector
+sudo bash hub/deploy/install-mcp.sh --label chat --ceiling readonly
 ```
 
-Das ausgegebene Token in eine eigene Datei — **nicht** in `hub.env`:
+Das Skript erledigt alles, was sich automatisieren lässt:
+
+1. prüft, dass der Hub läuft, und liest **die echte Listen-Adresse aus `ss`**
+   statt sie zu raten — je nach Einrichtung ist das `127.0.0.1`, `0.0.0.0`
+   oder das Docker-Gateway
+2. findet den Caddy-Container und dessen Netz-Gateway
+3. stellt das abgestufte Token aus und legt es in `/etc/skconnector/mcp.env`
+   (0640 root:skconnector) — **nie** in `hub.env`
+4. installiert den Dienst `skconnector-mcp` und prüft, dass er lauscht
+5. erzeugt einen geheimen Pfad mit `openssl rand -hex 32`
+6. druckt den fertigen Caddy-Block und die Connector-URL
+
+Enger einstellen geht über die Argumente:
 
 ```bash
-sudo install -m 0640 -o root -g skconnector /dev/null /etc/skconnector/mcp.env
-echo 'CONNECTOR_CONTROL_TOKEN=skc_ctl_...' | sudo tee /etc/skconnector/mcp.env
+# nur ein Gerät:
+sudo bash hub/deploy/install-mcp.sh --label chat --ceiling readonly --devices mac-simon
+
+# nur Mitteilungen, gar kein Lesen:
+sudo bash hub/deploy/install-mcp.sh --label chat --ceiling notify
 ```
 
-### 2. MCP-Dienst installieren
-
-```bash
-sudo cp -r /opt/src/sk-f/connector/mcp-server /opt/skconnector/
-sudo /opt/skconnector/venv/bin/pip install -q -r /opt/skconnector/mcp-server/requirements.txt
-sudo chown -R root:skconnector /opt/skconnector/mcp-server
-
-sudo cp /opt/src/sk-f/connector/hub/deploy/skconnector-mcp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now skconnector-mcp
-sudo systemctl status skconnector-mcp --no-pager | head -12
-sudo ss -lntp | grep 8788        # muss 172.18.0.1:8788 zeigen
-```
-
-### 3. Caddy: Endpunkt hinter einem geheimen Pfad
-
-Der MCP-Endpunkt hat **keine eigene Authentifizierung**. Der Schutz liegt im
-Pfad — dasselbe Muster, das dein `alex-mail-mcp`-Block schon benutzt. Pfad mit
-`openssl rand -hex 32` erzeugen, nicht ausdenken.
-
-In `/opt/alex-mail-mcp/Caddyfile` ergänzen:
-
-```
-mcp.138.199.230.178.sslip.io {
-    handle_path /DEIN-GEHEIMER-PFAD/* {
-        reverse_proxy 172.18.0.1:8788 {
-            transport http {
-                read_timeout 300s
-                write_timeout 300s
-            }
-        }
-    }
-    handle {
-        respond "Not found" 404
-    }
-}
-```
-
-```bash
-docker exec alex-mail-mcp-caddy-1 caddy reload --config /etc/caddy/Caddyfile
-curl -s -o /dev/null -w '%{http_code}\n' https://mcp.138.199.230.178.sslip.io/
-# 404 erwartet - ohne den geheimen Pfad gibt es nichts zu sehen
-```
-
-> **Der geheime Pfad ist ein Passwort.** Wer die vollständige URL kennt, hat
-> den Zugriff, den das hinterlegte Token erlaubt. Deshalb steht dort ein
-> `readonly`-Token und nicht das Master-Token. Behandle die URL wie ein
-> Geheimnis: nicht in Chats, nicht in Screenshots, nicht ins Repo.
+Was **nicht** automatisch geht: der Caddy-Block. Der Caddyfile gehört einem
+anderen Stack (`alex-mail-mcp`), und ein Skript, das fremde Konfiguration
+umschreibt, ist ein Skript, das irgendwann etwas kaputt macht. Das Skript
+druckt den Block fertig aus, einfügen musst du ihn selbst.
 
 ### 4. Als Custom Connector eintragen
 
