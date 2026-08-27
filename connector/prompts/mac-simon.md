@@ -1,195 +1,162 @@
-# Prompt für Claude Code auf Simons Mac
+# Prompt für Claude Code auf Simons Mac — Verbindung abschließen
 
+Stand: Hub läuft, `hetzner` und `mac-simon` sind online. Was fehlt, steht unten.
 Alles ab der Trennlinie in Claude Code auf dem eigenen Mac einfügen.
 
 ---
 
-Du richtest den SK-Connector fertig ein. Ich sitze am Mac und kann Dialoge
-wegklicken und Passwörter eingeben — frag mich, wenn du etwas brauchst, statt zu
-raten.
+Wir schließen die Einrichtung des SK-Connectors ab. Ich sitze am Mac und kann
+Dialoge wegklicken — frag mich, wenn du etwas brauchst, statt zu raten.
 
-## Ausgangslage
+## Stand
 
-- Repo: `https://github.com/kosimus12/sk-f`, Branch
+- Hub-URL: `https://hub.138.199.230.178.sslip.io` — läuft, HTTPS antwortet
+- Hetzner: `root@138.199.230.178` (`hermes-1`), Repo unter `/opt/src/sk-f`
+- Control-Token: auf dem Server in `/etc/skconnector/hub.env`. Von dort lesen,
+  nie in eine Datei schreiben, die im Repo landet.
+- `hetzner` und `mac-simon` sind bereits enrolled und online
+- Repo auf diesem Mac: `~/src/sk-f`, Branch
   `claude/hetzner-multi-device-connector-ply62n`
-- Hetzner: `root@138.199.230.178`, Hostname `hermes-1`, Ubuntu 24.04.
-  Ich habe von diesem Mac aus SSH-Zugang als root.
-- Der Hub ist dort **bereits installiert und läuft**: systemd-Unit
-  `skconnector-hub`, lauscht auf `127.0.0.1:8787`, Quellcode in
-  `/opt/src/sk-f`. Was noch fehlt: TLS davor, Geräte anlegen, dieser Mac.
-- Der Server meldet „System restart required" — das ist Teil deiner Aufgabe.
 
-Das Control-Token steht auf dem Server in `/etc/skconnector/hub.env`. Lies es
-dort aus, statt mich danach zu fragen. Schreib es **nirgends** in eine Datei, die
-im Repo landet.
+Auf dem Hetzner setzt du für alle `skconnect.py`-Aufrufe:
+
+```bash
+cd /opt/src/sk-f/connector
+export CONNECTOR_HUB_URL=https://hub.138.199.230.178.sslip.io
+export CONNECTOR_CONTROL_TOKEN="$(grep -oP '(?<=CONNECTOR_CONTROL_TOKEN=).*' /etc/skconnector/hub.env)"
+```
 
 ## Aufgaben, in dieser Reihenfolge
 
-### 1. Hetzner neu starten
+### 1. Netzteil
 
-Der Server hat ausstehende Kernel-Updates. Jetzt ist der richtige Zeitpunkt,
-weil noch nichts davon abhängt.
+Frag mich, ob das MacBook am Strom hängt. `disablesleep=1` ist gesetzt und gilt
+systemweit — der Mac schläft also nie, auch nicht im Akkubetrieb. Ohne Netzteil
+läuft er leer und ist dann offline. Wenn ich das nicht dauerhaft will, sag mir:
+`sudo pmset -a disablesleep 0` nimmt es zurück, dann ist er zugeklappt aber
+nicht mehr erreichbar.
 
-```bash
-ssh root@138.199.230.178 'apt list --upgradable 2>/dev/null | head -20'
-ssh root@138.199.230.178 'apt-get update -qq && apt-get -y upgrade && systemctl reboot' || true
-```
+### 2. Agent aktualisieren
 
-Dann warten, bis er wieder da ist, und prüfen, dass der Hub von selbst
-hochgekommen ist:
-
-```bash
-until ssh -o ConnectTimeout=5 root@138.199.230.178 'systemctl is-active skconnector-hub' 2>/dev/null; do sleep 10; done
-ssh root@138.199.230.178 'systemctl status skconnector-hub --no-pager -l | head -15; curl -s localhost:8787/healthz'
-```
-
-Kommt der Hub nach dem Neustart **nicht** von selbst hoch, ist das ein Fehler —
-melde ihn mir, bevor du weitermachst.
-
-### 2. TLS einrichten
-
-Erst prüfen, was die Ports belegt — auf dem Server laufen vermutlich schon
-Websites:
+Die Sperrerkennung war kaputt (`screen_locked: null`) und ist gefixt:
 
 ```bash
-ssh root@138.199.230.178 'ss -lntp | grep -E ":80 |:443 "'
+cd ~/src/sk-f && git pull
+sudo install -m 0755 connector/agent/agent.py /usr/local/libexec/skconnector/agent.py
+sudo launchctl kickstart -k system/de.skfinanzberatung.connector
 ```
 
-- **Nichts belegt** → Caddy aus dem offiziellen Cloudsmith-Repo installieren
-  (Caddy ist *nicht* in Ubuntus Standardquellen), dann
-  `/opt/src/sk-f/connector/hub/deploy/Caddyfile` nach `/etc/caddy/Caddyfile`
-  kopieren und den Hostnamen eintragen.
-- **nginx läuft schon** → kein Caddy. Stattdessen
-  `/opt/src/sk-f/connector/hub/deploy/nginx-hub.conf` als vhost anlegen und
-  `certbot --nginx` laufen lassen. Die Proxy-Timeouts in der Vorlage sind
-  wichtig: ohne sie bricht nginx den Long-Poll nach 60 s mit 504 ab.
+Gegenprobe vom Hetzner: `python3 tools/skconnect.py probe mac-simon` —
+`screen_locked` muss jetzt `true` oder `false` sein, nicht `null`.
 
-Den Hostnamen brauchst du von mir. Frag mich, welche Subdomain ich nehmen will,
-und prüfe vorher, ob der A-Record schon auf `138.199.230.178` zeigt:
-
-```bash
-dig +short GEWÄHLTE-SUBDOMAIN
-```
-
-Zeigt er noch nicht dorthin: sag mir Bescheid, ich lege ihn an — Zertifikate
-gibt es sonst keine. Danach:
-
-```bash
-curl -s https://GEWÄHLTE-SUBDOMAIN/healthz     # erwartet {"ok":true,...}
-```
-
-### 3. Den Hetzner selbst als Gerät anbinden
-
-Damit ich ihn wie jeden anderen Rechner ansprechen kann:
-
-```bash
-ssh root@138.199.230.178
-cd /opt/src/sk-f && git pull && cd connector
-export CONNECTOR_HUB_URL=https://GEWÄHLTE-SUBDOMAIN
-export CONNECTOR_CONTROL_TOKEN="$(grep -oP '(?<=CONNECTOR_CONTROL_TOKEN=).*' /etc/skconnector/hub.env)"
-
-python3 tools/skconnect.py add hetzner "Hetzner hermes-1" linux \
-        --owner simon --mode full --caps shell,fs,notify,probe
-sudo bash agent/linux/install.sh --hub "$CONNECTOR_HUB_URL" --code skc_enr_...
-```
-
-### 4. Diesen Mac anbinden
-
-Auf dem Hetzner das Gerät anlegen:
-
-```bash
-python3 tools/skconnect.py add mac-simon "Simons Mac" macos \
-        --owner simon --mode full \
-        --caps shell,fs,notify,probe,app,browser,mail
-```
-
-Dann hier lokal, mit dem Enrollment-Code von oben:
-
-```bash
-git clone https://github.com/kosimus12/sk-f ~/src/sk-f 2>/dev/null || (cd ~/src/sk-f && git pull)
-cd ~/src/sk-f && git checkout claude/hetzner-multi-device-connector-ply62n && git pull
-cd connector
-
-bash agent/macos/setup-mac.sh --hub https://GEWÄHLTE-SUBDOMAIN --code skc_enr_...
-```
-
-**Wichtig:** `setup-mac.sh` NICHT mit `sudo` starten — es ruft sudo selbst auf,
-wo es das braucht. Mit `sudo` davor laufen die Freigabe-Dialoge im falschen
-Benutzerkontext und erscheinen gar nicht.
-
-Das Skript hält an, wenn Zustimmungsdialoge kommen. Sag mir jedes Mal, was ich
-klicken soll, und warte auf meine Bestätigung.
-
-### 5. Die zwei Dinge, für die es keinen Dialog gibt
-
-Du kannst sie nicht selbst setzen. Führ mich durch, prüf danach nach:
-
-**a) JavaScript aus Apple Events**
-- Safari: Einstellungen → Erweitert → „Funktionen für Webentwickler anzeigen",
-  dann Menü *Entwickler* → „JavaScript aus Apple Events erlauben"
-- Chrome: *Darstellung* → *Entwickler* → „JavaScript über Apple Events zulassen"
-
-**b) Festplattenvollzugriff** für `/bin/bash` und `/usr/bin/python3`
-- Systemeinstellungen → Datenschutz & Sicherheit → Festplattenvollzugriff
-- „+", dann Cmd+Shift+G und die beiden Pfade eintragen
-
-Gegenprobe vom Hetzner aus, so lange wiederholen, bis nichts mehr `FEHLT` zeigt:
+### 3. Freigaben prüfen und schließen
 
 ```bash
 python3 tools/skconnect.py permissions mac-simon
 ```
 
-### 6. Zugriff für mich (skuper) in Claude Code auf diesem Mac
+Für alles, was `FEHLT` zeigt, führ mich durch:
 
-Trag den MCP-Server in `~/.claude/mcp.json` ein (vorhandene Einträge behalten):
+- **Automation** für ein Programm fehlt → am Mac, **ohne sudo**:
+  `bash ~/src/sk-f/connector/agent/macos/grant-permissions.sh --apps "Name"`
+- **JavaScript aus Apple Events**: Safari → Einstellungen → Erweitert →
+  „Funktionen für Webentwickler anzeigen", dann Menü *Entwickler* →
+  „JavaScript aus Apple Events erlauben". Chrome: *Darstellung* → *Entwickler*
+  → „JavaScript über Apple Events zulassen".
+- **Festplattenvollzugriff**: Systemeinstellungen → Datenschutz & Sicherheit →
+  Festplattenvollzugriff → „+" → Cmd+Shift+G → `/bin/bash` und
+  `/usr/bin/python3` eintragen.
+
+Wiederhol `permissions`, bis nichts mehr auf `FEHLT` steht.
+
+### 4. Funktionstest über alle vier Bereiche
+
+Vom Hetzner aus, und sag mir bei jedem, was rauskam:
+
+```bash
+python3 tools/skconnect.py run mac-simon 'whoami && ls ~/Documents | head -5'
+python3 tools/skconnect.py run mac-simon 'echo test > ~/Documents/ct.txt && cat ~/Documents/ct.txt && rm ~/Documents/ct.txt'
+```
+
+Und über die MCP-Werkzeuge (nach Schritt 5) bzw. per API: `app.list`,
+`browser.tabs`, `mail.accounts`. Bleibt `ls ~/Documents` leer, obwohl da etwas
+liegt, fehlt der Festplattenvollzugriff.
+
+### 5. MCP-Server lokal einrichten
+
+**Achtung Python-Version:** Der Agent läuft auf `/usr/bin/python3` (3.9.6), der
+MCP-Server braucht aber **3.10 oder neuer**. Prüf das zuerst:
+
+```bash
+/usr/bin/python3 --version
+python3 --version
+brew --version 2>/dev/null
+```
+
+Ist kein Python ≥3.10 da, installier eines (`brew install python@3.12`) und
+richte damit ein venv ein:
+
+```bash
+/opt/homebrew/bin/python3.12 -m venv ~/.skconnector-venv
+~/.skconnector-venv/bin/pip install -r ~/src/sk-f/connector/mcp-server/requirements.txt
+```
+
+Dann in `~/.claude/mcp.json` eintragen — **vorhandene Einträge behalten**, den
+Interpreter aus dem venv nehmen:
 
 ```json
 {
   "mcpServers": {
     "skconnector": {
-      "command": "python3",
+      "command": "/Users/skuper/.skconnector-venv/bin/python",
       "args": ["/Users/skuper/src/sk-f/connector/mcp-server/server.py"],
       "env": {
-        "CONNECTOR_HUB_URL": "https://GEWÄHLTE-SUBDOMAIN",
-        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_..."
+        "CONNECTOR_HUB_URL": "https://hub.138.199.230.178.sslip.io",
+        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_…"
       }
     }
   }
 }
 ```
 
-Vorher `python3 -m pip install --user -r connector/mcp-server/requirements.txt`.
-Danach Claude Code neu starten und mit `/mcp` prüfen, ob `skconnector`
-verbunden ist.
+Claude Code neu starten, dann `/mcp` — `skconnector` muss verbunden sein.
+Erster Test: „Zeig mir die verbundenen Geräte."
 
-### 7. Zugriff für die Web-Session (sk-f)
+### 6. Enrollment-Code für Katyas Mac
 
-Damit Claude im Browser dieselben Werkzeuge bekommt, ohne dass ein Token in Git
-liegt: Im Repo gibt es eine `.mcp.json`, die zwei Umgebungsvariablen liest.
-Sag mir, dass ich sie in meiner Claude-Code-Umgebung hinterlegen muss —
-`CONNECTOR_HUB_URL` und `CONNECTOR_CONTROL_TOKEN` — und wo das geht.
-Trag sie **nicht** in eine Datei im Repo ein.
+```bash
+python3 tools/skconnect.py add mac-katya "Katyas Mac" macos \
+        --owner katya --mode full \
+        --caps shell,fs,notify,probe,app,browser,mail
+```
 
-### 8. Abnahme
+Gib mir den Code aus — den brauche ich für den Prompt auf Katyas Mac. Er gilt
+30 Minuten und nur einmal.
 
-Ich klappe den Deckel zu und sperre. Dann prüf der Reihe nach und berichte mir
-das Ergebnis:
+### 7. Zugriff für die Web-Session
+
+Damit Claude im Browser dieselben Werkzeuge bekommt: Im Repo liegt eine
+`.mcp.json`, die `CONNECTOR_HUB_URL` und `CONNECTOR_CONTROL_TOKEN` aus
+Umgebungsvariablen liest. Sag mir, wo ich die beiden in der Konfiguration
+meiner Claude-Code-Umgebung hinterlegen muss. Trag sie **nicht** in eine Datei
+im Repo ein.
+
+### 8. Abnahme im zugeklappten Zustand
+
+Ich schließe den Deckel (Netzteil dran). Warte 60 Sekunden, dann:
 
 ```bash
 python3 tools/skconnect.py devices
-python3 tools/skconnect.py probe mac-simon        # zeigt die Schlaf-Werte
-python3 tools/skconnect.py run mac-simon 'whoami && ls ~/Documents | head -5'
-python3 tools/skconnect.py run mac-simon 'echo test > ~/Documents/ct.txt && cat ~/Documents/ct.txt && rm ~/Documents/ct.txt'
-python3 tools/skconnect.py permissions mac-simon
+python3 tools/skconnect.py probe mac-simon
+python3 tools/skconnect.py run mac-simon 'uptime'
 ```
 
-In der `probe`-Ausgabe muss `bleibt_wach_zugeklappt: true` stehen. Steht dort
-`false`, hat `disablesleep` nicht gegriffen — sag mir das deutlich, statt es zu
-übergehen.
+In der `probe`-Ausgabe muss `bleibt_wach_zugeklappt: true` stehen und
+`battery.ac: true`. Sag mir deutlich, wenn eines von beiden nicht stimmt.
 
-### 9. Token tauschen
+### 9. Control-Token tauschen
 
-Das aktuelle Control-Token stand in einem Chatverlauf. Zum Schluss austauschen:
+Es steht mehrfach in einem Chatverlauf. Zum Schluss:
 
 ```bash
 ssh root@138.199.230.178
@@ -197,13 +164,12 @@ sudo sed -i "s|^CONNECTOR_CONTROL_TOKEN=.*|CONNECTOR_CONTROL_TOKEN=skc_ctl_$(pyt
 sudo systemctl restart skconnector-hub
 ```
 
-Danach das neue Token überall nachziehen, wo du es in Schritt 6 und 7 eingetragen
-hast, und noch einmal `devices` aufrufen, damit klar ist, dass es funktioniert.
-Die Geräte-Token der Agenten sind davon nicht betroffen — die bleiben gültig.
+Danach das neue Token in `~/.claude/mcp.json` und in den Umgebungsvariablen
+nachziehen und mit `devices` gegenprüfen. Die Geräte-Token der Agenten sind
+davon nicht betroffen — die Macs bleiben verbunden.
 
 ## Grundsätzlich
 
-- Arbeite die Schritte der Reihe nach ab und zeig mir nach jedem, was
-  herausgekommen ist.
+- Schritte der Reihe nach, nach jedem zeigen, was herauskam.
 - Wenn etwas fehlschlägt: nicht drumherum bauen, sondern mir sagen, was klemmt.
-- Erfinde keine Domain, keinen Pfad und kein Token. Frag lieber.
+- Erfinde keinen Pfad und kein Token. Frag lieber.
