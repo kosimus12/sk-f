@@ -94,12 +94,19 @@ def cmd_add(args: argparse.Namespace) -> None:
     print("Enrollment-Code (gueltig %d Minuten, einmal verwendbar):" % (args.ttl // 60))
     print("  " + out["enrollment_code"])
     print()
-    if args.platform in ("macos", "linux"):
-        sub = "macos" if args.platform == "macos" else "linux"
+    if args.platform == "macos":
+        # setup-mac.sh statt install.sh: es setzt zusaetzlich die
+        # Energieeinstellungen fuer den zugeklappten Betrieb und loest die
+        # macOS-Freigabedialoge aus. OHNE sudo - es ruft sudo selbst auf, wo
+        # noetig; mit sudo davor erscheinen die Dialoge im falschen
+        # Benutzerkontext und damit gar nicht.
+        print("Auf dem Mac ausfuehren - OHNE sudo, in der grafischen Sitzung:")
+        print(f"  bash agent/macos/setup-mac.sh --hub {HUB} \\")
+        print(f"       --code {out['enrollment_code']}")
+    elif args.platform == "linux":
         print("Auf dem Geraet ausfuehren:")
-        print(f"  sudo bash agent/{sub}/install.sh --hub {HUB} \\")
-        print(f"       --code {out['enrollment_code']}"
-              + (" --keep-awake" if args.platform == "macos" else ""))
+        print(f"  sudo bash agent/linux/install.sh --hub {HUB} \\")
+        print(f"       --code {out['enrollment_code']}")
 
 
 def cmd_run(args: argparse.Namespace) -> None:
