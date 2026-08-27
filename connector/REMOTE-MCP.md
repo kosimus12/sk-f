@@ -124,6 +124,29 @@ Erster Test: *„Zeig mir die verbundenen Geräte."* → `devices` muss drei Zei
 liefern. Dann die Gegenprobe, dass die Grenze wirkt: *„Führ `uptime` auf
 mac-simon aus."* → muss mit einer Meldung über die Token-Obergrenze scheitern.
 
+## Claude Code im Browser (claude.ai/code)
+
+Diese Oberfläche braucht **keinen** Custom Connector. Sie liest die `.mcp.json`
+im Repo und startet den MCP-Server als lokalen Prozess im Sitzungs-Container —
+wie Claude Code auf dem Mac, nur dass der Container bei jeder Sitzung neu ist
+und kein MCP-SDK mitbringt. Deshalb geht `.mcp.json` über
+`connector/mcp-server/run-local.sh`: der Wrapper legt beim ersten Start ein
+venv unter `~/.cache/skconnector-venv` an, installiert das SDK und übergibt an
+den Server. Setup-Ausgaben landen auf stderr, damit auf stdout nur JSON-RPC
+steht.
+
+Zu setzen sind nur zwei Umgebungsvariablen in der Umgebungskonfiguration
+(nicht im Repo — die `.mcp.json` enthält nur die Namen):
+
+```
+CONNECTOR_HUB_URL=https://hub.138.199.230.178.sslip.io
+CONNECTOR_CONTROL_TOKEN=<Token aus token-issue>
+```
+
+Die öffentliche Hub-Adresse, nicht `172.18.0.1` — das Docker-Gateway ist vom
+Container aus nicht erreichbar. Umgebungsvariablen greifen erst in einer
+**neuen** Sitzung; die laufende übernimmt sie nicht.
+
 ## Die drei Oberflächen im Vergleich
 
 | | Transport | Token | Was geht |
