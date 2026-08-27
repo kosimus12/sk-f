@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "skconnector": {
+      "command": "python3",
+      "args": ["connector/mcp-server/server.py"],
+      "env": {
+        "CONNECTOR_HUB_URL": "${CONNECTOR_HUB_URL}",
+        "CONNECTOR_CONTROL_TOKEN": "${CONNECTOR_CONTROL_TOKEN}"
+      }
+    }
+  }
+}
