@@ -104,6 +104,10 @@ sudo systemctl reload caddy
 vhost anlegen (`hub/deploy/nginx-hub.conf` als Vorlage) und
 `certbot --nginx -d hub.DEINE-DOMAIN.de` laufen lassen.
 
+**Steht dort `docker-proxy`**, laeuft der Reverse-Proxy in einem
+Container — dann gilt weder das eine noch das andere. Vorgehen je
+nach Proxy-Typ: [`hub/deploy/DOCKER-PROXY.md`](hub/deploy/DOCKER-PROXY.md).
+
 Gegenprobe:
 
 ```bash

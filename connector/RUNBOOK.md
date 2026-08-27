@@ -47,6 +47,10 @@ sudo systemctl reload caddy
 #   sudo nginx -t && sudo systemctl reload nginx
 #   sudo certbot --nginx -d hub.DEINE-DOMAIN.de
 
+# 2c. docker-proxy haelt die Ports -> Reverse-Proxy laeuft im Container.
+#     Weder Caddy noch nginx auf dem Host installieren, sondern:
+#     siehe hub/deploy/DOCKER-PROXY.md
+
 curl -s https://hub.DEINE-DOMAIN.de/healthz
 ```
 
