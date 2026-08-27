@@ -44,7 +44,7 @@ APP_DIR=/opt/skconnector
 CONF=/etc/skconnector
 
 # ---------------------------------------------------------------------------
-schritt "1/6  Hub pruefen"
+schritt "1/7  Hub pruefen"
 
 [[ -f "$CONF/hub.env" ]] || { fehler "$CONF/hub.env fehlt - laeuft der Hub?"; exit 1; }
 MASTER="$(grep -oP '(?<=CONNECTOR_CONTROL_TOKEN=).*' "$CONF/hub.env" | head -1)"
@@ -65,7 +65,7 @@ curl -sf --max-time 10 "$HUB_URL/healthz" >/dev/null \
 ok "healthz antwortet"
 
 # ---------------------------------------------------------------------------
-schritt "2/6  Reverse-Proxy finden"
+schritt "2/7  Reverse-Proxy finden"
 
 CADDY="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -i caddy | head -1 || true)"
 if [[ -n "$CADDY" ]]; then
@@ -80,19 +80,57 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-schritt "3/6  Abgestuftes Token ausstellen"
+schritt "3/7  Hub-Version pruefen und noetigenfalls aktualisieren"
+
+# Der Hub laeuft aus $APP_DIR/hub, nicht aus dem Git-Arbeitsverzeichnis. Ein
+# 'git pull' allein aktualisiert ihn deshalb NICHT - die Token-Verwaltung
+# fehlt dem laufenden Prozess dann weiterhin.
+STATUS="$(curl -s -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $MASTER" "$HUB_URL/v1/control-tokens")"
+
+if [[ "$STATUS" == "404" ]]; then
+  warn "Der laufende Hub kennt die Token-Verwaltung noch nicht - aktualisiere ihn."
+  cp -r "$SRC_DIR/hub" "$APP_DIR/"
+  chown -R root:skconnector "$APP_DIR/hub"
+  systemctl restart skconnector-hub
+  for _ in $(seq 1 20); do
+    curl -sf --max-time 3 "$HUB_URL/healthz" >/dev/null && break
+    sleep 1
+  done
+  STATUS="$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $MASTER" "$HUB_URL/v1/control-tokens")"
+  [[ "$STATUS" == "200" ]] || {
+    fehler "Hub laesst sich nicht aktualisieren (Status $STATUS):"
+    journalctl -u skconnector-hub -n 20 --no-pager | sed 's/^/    /'
+    exit 1; }
+  ok "Hub aktualisiert und neu gestartet"
+elif [[ "$STATUS" == "200" ]]; then
+  ok "Hub kennt die Token-Verwaltung"
+else
+  fehler "Unerwartete Antwort von /v1/control-tokens: HTTP $STATUS"
+  [[ "$STATUS" == "403" ]] && fehler "Das Master-Token aus hub.env wird abgelehnt."
+  exit 1
+fi
+
+schritt "4/7  Abgestuftes Token ausstellen"
 
 DEV_JSON="[]"
 if [[ -n "$DEVICES" ]]; then
   DEV_JSON="$(python3 -c "import json,sys; print(json.dumps([d for d in sys.argv[1].split(',') if d]))" "$DEVICES")"
 fi
 
-ANTWORT="$(curl -sf -X POST "$HUB_URL/v1/control-tokens" \
+ANTWORT="$(curl -s -w $'\n%{http_code}' -X POST "$HUB_URL/v1/control-tokens" \
   -H "Authorization: Bearer $MASTER" -H 'Content-Type: application/json' \
-  -d "{\"label\":\"$LABEL\",\"ceiling\":\"$CEILING\",\"devices\":$DEV_JSON}")" \
-  || { fehler "Token konnte nicht ausgestellt werden. Laeuft eine Hub-Version mit Token-Verwaltung? (git pull, Dienst neu starten)"; exit 1; }
+  -d "{\"label\":\"$LABEL\",\"ceiling\":\"$CEILING\",\"devices\":$DEV_JSON}")"
+CODE="$(tail -1 <<<"$ANTWORT")"
+BODY="$(sed '$d' <<<"$ANTWORT")"
+if [[ "$CODE" != "200" ]]; then
+  fehler "Token konnte nicht ausgestellt werden (HTTP $CODE):"
+  echo "    $BODY"
+  exit 1
+fi
 
-SCOPED="$(python3 -c "import json,sys; print(json.load(sys.stdin)['token'])" <<<"$ANTWORT")"
+SCOPED="$(python3 -c "import json,sys; print(json.load(sys.stdin)['token'])" <<<"$BODY")"
 ok "Token '$LABEL' ausgestellt, Obergrenze '$CEILING'${DEVICES:+, nur $DEVICES}"
 
 install -m 0640 -o root -g skconnector /dev/null "$CONF/mcp.env"
@@ -108,7 +146,7 @@ chown root:skconnector "$CONF/mcp.env"
 ok "$CONF/mcp.env geschrieben (0640 root:skconnector)"
 
 # ---------------------------------------------------------------------------
-schritt "4/6  Dienst installieren"
+schritt "5/7  Dienst installieren"
 
 cp -r "$SRC_DIR/mcp-server" "$APP_DIR/"
 "$APP_DIR/venv/bin/pip" install -q -r "$APP_DIR/mcp-server/requirements.txt"
@@ -128,14 +166,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-schritt "5/6  Geheimen Pfad erzeugen"
+schritt "6/7  Geheimen Pfad erzeugen"
 
 GEHEIM="$(openssl rand -hex 32)"
 HOSTNAME_MCP="mcp.$(hostname -I | awk '{print $1}').sslip.io"
 ok "Pfad erzeugt (steht unten im Caddy-Block)"
 
 # ---------------------------------------------------------------------------
-schritt "6/6  Was du jetzt von Hand machst"
+schritt "7/7  Was du jetzt von Hand machst"
 
 CADDYFILE="$(docker inspect "${CADDY:-x}" -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
 
