@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import sys
 import time
 import urllib.error
@@ -153,6 +154,21 @@ def cmd_mode(args: argparse.Namespace) -> None:
     print(f"{out['id']}: Modus jetzt '{out['mode']}'")
 
 
+def token_ziel(label: str, explizit: str) -> pathlib.Path:
+    """Wohin das Token geschrieben wird, wenn es nicht angezeigt werden soll."""
+    if explizit:
+        return pathlib.Path(explizit).expanduser()
+    for basis in ("/etc/skconnector/tokens", "~/.skconnector"):
+        ordner = pathlib.Path(basis).expanduser()
+        try:
+            ordner.mkdir(parents=True, exist_ok=True)
+            os.chmod(ordner, 0o700)
+            return ordner / f"{label}.token"
+        except OSError:
+            continue
+    return pathlib.Path(f"{label}.token")
+
+
 def cmd_token_issue(args: argparse.Namespace) -> None:
     out = call("POST", "/v1/control-tokens", {
         "label": args.label, "ceiling": args.ceiling,
@@ -161,8 +177,30 @@ def cmd_token_issue(args: argparse.Namespace) -> None:
     print(f"Token '{out['label']}' ausgestellt (Obergrenze: {out['ceiling']}"
           + (f", nur {', '.join(out['devices'])}" if out["devices"] else "") + ")")
     print()
-    print("Einmalig angezeigt - jetzt kopieren:")
-    print("  " + out["token"])
+
+    if args.show:
+        print("Einmalig angezeigt - jetzt kopieren:")
+        print("  " + out["token"])
+        return
+
+    # Standardmaessig NICHT anzeigen. Terminal-Ausgabe landet zu leicht in
+    # einem Chat oder Screenshot, und dieses Token ist ein Passwort. Es geht
+    # in eine Datei, die nur der Besitzer lesen darf.
+    ziel = token_ziel(args.label, args.out)
+    fd = os.open(str(ziel), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(out["token"] + "\n")
+    os.chmod(ziel, 0o600)
+
+    print(f"Token geschrieben nach {ziel} (0600), {len(out['token'])} Zeichen,")
+    print(f"beginnt mit {out['token'][:12]}...")
+    print()
+    print("In die Zwischenablage, ohne es ins Terminal zu drucken:")
+    print(f"    pbcopy < {ziel}                 # macOS")
+    print(f"    xclip -selection clipboard < {ziel}   # Linux mit X")
+    print()
+    print("Mit --show wird es stattdessen angezeigt. Dann aber die Ausgabe")
+    print("nicht in einen Chat kopieren - wer das Token hat, hat den Zugriff.")
 
 
 def cmd_token_list(args: argparse.Namespace) -> None:
@@ -250,6 +288,10 @@ def main() -> None:
                     help="Obergrenze - hoechstens das darf dieses Token")
     ti.add_argument("--devices", default="",
                     help="Komma-Liste; leer = alle Geraete")
+    ti.add_argument("--out", default="",
+                    help="Datei fuer das Token (Vorgabe: /etc/skconnector/tokens/<label>.token)")
+    ti.add_argument("--show", action="store_true",
+                    help="Token im Terminal anzeigen statt in eine Datei zu schreiben")
     ti.set_defaults(func=cmd_token_issue)
 
     tl = sub.add_parser("token-list", help="ausgestellte Control-Tokens anzeigen")

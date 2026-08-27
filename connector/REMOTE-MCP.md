@@ -23,6 +23,18 @@ python3 tools/skconnect.py token-issue cowork --ceiling readonly
 python3 tools/skconnect.py token-list
 ```
 
+Ausgegeben wird das Token nicht im Terminal, sondern in eine Datei mit 0600
+unter `/etc/skconnector/tokens/`. Terminalausgabe landet zu leicht in einem
+Chat oder Screenshot, und dieses Token ist ein Passwort. In die Zwischenablage
+kommt es ohne Umweg über den Bildschirm:
+
+```bash
+pbcopy < /etc/skconnector/tokens/chat.token          # macOS
+xclip -selection clipboard < /etc/skconnector/tokens/chat.token   # Linux
+```
+
+`--show` zeigt es doch an, `--out PFAD` wählt eine andere Datei.
+
 Ein Token mit `--ceiling readonly` kann lesen — Dateien, Mails, offene Tabs,
 Systemstatus — und sonst nichts. Kein `shell`, kein `fs.write`, kein
 `app.applescript`, kein `browser.js`, kein `mail.send`. Auch dann nicht, wenn
