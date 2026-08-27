@@ -69,6 +69,16 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
 
+CREATE TABLE IF NOT EXISTS control_tokens (
+    token_hash  TEXT PRIMARY KEY,
+    label       TEXT NOT NULL,
+    ceiling     TEXT NOT NULL DEFAULT 'readonly',
+    devices     TEXT NOT NULL DEFAULT '[]',
+    created_at  REAL NOT NULL,
+    last_used   REAL,
+    revoked_at  REAL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
@@ -160,6 +170,57 @@ class Store:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+
+    # -- Abgestufte Control-Tokens ----------------------------------------
+    #
+    # Das Master-Token aus hub.env kann alles. Fuer Oberflaechen, die fremde
+    # Inhalte verarbeiten (Chat, Cowork), gibt es zusaetzliche Tokens mit
+    # einer Obergrenze: sie duerfen hoechstens das, was ihr 'ceiling'
+    # zulaesst, und optional nur auf bestimmten Geraeten arbeiten.
+
+    def create_control_token(self, label: str, ceiling: str = "readonly",
+                             devices: list[str] | None = None) -> str:
+        token = security.new_token(security.TOKEN_PREFIX_CONTROL)
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO control_tokens(token_hash,label,ceiling,devices,created_at)"
+                " VALUES(?,?,?,?,?)",
+                (security.hash_token(token), label, ceiling,
+                 json.dumps(devices or []), _now()),
+            )
+        return token
+
+    def control_token_by_value(self, token: str) -> dict | None:
+        th = security.hash_token(token)
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT * FROM control_tokens WHERE token_hash=? AND revoked_at IS NULL",
+                (th,),
+            ).fetchone()
+            if row is None:
+                return None
+            c.execute("UPDATE control_tokens SET last_used=? WHERE token_hash=?",
+                      (_now(), th))
+        d = dict(row)
+        d["devices"] = json.loads(d["devices"] or "[]")
+        d.pop("token_hash", None)
+        return d
+
+    def list_control_tokens(self) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT label,ceiling,devices,created_at,last_used,revoked_at"
+                " FROM control_tokens ORDER BY created_at"
+            ).fetchall()
+        return [{**dict(r), "devices": json.loads(r["devices"] or "[]")} for r in rows]
+
+    def revoke_control_token(self, label: str) -> int:
+        with self.conn() as c:
+            cur = c.execute(
+                "UPDATE control_tokens SET revoked_at=? WHERE label=? AND revoked_at IS NULL",
+                (_now(), label),
+            )
+            return cur.rowcount
 
     # -- Geraete ----------------------------------------------------------
     def create_device(

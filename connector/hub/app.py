@@ -57,13 +57,54 @@ def _bearer(authorization: str | None) -> str:
     return authorization.split(" ", 1)[1].strip()
 
 
-def require_control(authorization: str | None = Header(default=None)) -> str:
+class Aufrufer:
+    """Wer ruft, und was darf er hoechstens.
+
+    Das Master-Token aus hub.env darf alles. Zusaetzliche Tokens tragen eine
+    Obergrenze ('ceiling') und optional eine Geraeteliste - gedacht fuer
+    Oberflaechen wie Chat und Cowork, die staendig fremde Inhalte
+    verarbeiten und deshalb nicht dieselbe Reichweite haben sollen wie ein
+    Terminal, in dem ein Mensch sitzt.
+    """
+
+    def __init__(self, name: str, ceiling: str = "full",
+                 devices: list[str] | None = None):
+        self.name = name
+        self.ceiling = ceiling
+        self.devices = devices or []
+
+    def darf_geraet(self, device_id: str) -> bool:
+        return not self.devices or device_id in self.devices
+
+    def __str__(self) -> str:
+        return self.name
+
+
+def require_control(authorization: str | None = Header(default=None)) -> Aufrufer:
     token = _bearer(authorization)
     if not CONTROL_TOKEN:
         raise HTTPException(503, "Hub ist nicht konfiguriert (CONNECTOR_CONTROL_TOKEN fehlt)")
-    if not security.hmac.compare_digest(token, CONTROL_TOKEN):
-        raise HTTPException(403, "ungueltiges Control-Token")
-    return "control"
+    if security.hmac.compare_digest(token, CONTROL_TOKEN):
+        return Aufrufer("control")
+    scoped = store.control_token_by_value(token)
+    if scoped is not None:
+        return Aufrufer(f"control:{scoped['label']}", scoped["ceiling"], scoped["devices"])
+    raise HTTPException(403, "ungueltiges Control-Token")
+
+
+def require_master(authorization: str | None = Header(default=None)) -> Aufrufer:
+    """Nur das Master-Token aus hub.env.
+
+    Geraete anlegen, umstufen, widerrufen und Tokens ausstellen sind
+    Verwaltungsaufgaben. Duerfte ein abgestuftes Token das, koennte es die
+    eigene Obergrenze umgehen - etwa indem es ein Geraet auf 'full' setzt
+    oder sich selbst ein Token ohne Grenze ausstellt.
+    """
+    aufrufer = require_control(authorization)
+    if aufrufer.name != "control":
+        raise HTTPException(
+            403, "Dieser Vorgang verlangt das Master-Control-Token")
+    return aufrufer
 
 
 def require_device(authorization: str | None = Header(default=None)) -> dict:
@@ -137,7 +178,7 @@ def healthz() -> dict:
 # ---------------------------------------------------------------------------
 
 @app.post("/v1/devices")
-def create_device(req: EnrollRequest, actor: str = Depends(require_control)) -> dict:
+def create_device(req: EnrollRequest, actor: Aufrufer = Depends(require_master)) -> dict:
     """Legt ein Geraet an (oder aktualisiert es) und gibt einen Enrollment-Code aus."""
     unknown = set(req.capabilities) - set(security.KIND_CAPABILITY.values())
     if unknown:
@@ -161,7 +202,7 @@ def create_device(req: EnrollRequest, actor: str = Depends(require_control)) -> 
             fields["push_url"] = req.push_url
         store.update_device(req.device_id, **fields)
     code = store.create_enrollment(req.device_id, req.ttl_s)
-    store.audit(actor, "device.enroll_code", req.device_id, mode=req.mode, owner=req.owner)
+    store.audit(str(actor), "device.enroll_code", req.device_id, mode=req.mode, owner=req.owner)
     return {
         "device": store.get_device(req.device_id),
         "enrollment_code": code,
@@ -170,12 +211,12 @@ def create_device(req: EnrollRequest, actor: str = Depends(require_control)) -> 
 
 
 @app.get("/v1/devices")
-def list_devices(include_revoked: bool = False, actor: str = Depends(require_control)) -> dict:
+def list_devices(include_revoked: bool = False, actor: Aufrufer = Depends(require_control)) -> dict:
     return {"devices": store.list_devices(include_revoked)}
 
 
 @app.get("/v1/devices/{device_id}")
-def get_device(device_id: str, actor: str = Depends(require_control)) -> dict:
+def get_device(device_id: str, actor: Aufrufer = Depends(require_control)) -> dict:
     device = store.get_device(device_id)
     if device is None:
         raise HTTPException(404, "unbekanntes Geraet")
@@ -183,7 +224,7 @@ def get_device(device_id: str, actor: str = Depends(require_control)) -> dict:
 
 
 @app.patch("/v1/devices/{device_id}")
-def patch_device(device_id: str, req: DeviceUpdate, actor: str = Depends(require_control)) -> dict:
+def patch_device(device_id: str, req: DeviceUpdate, actor: Aufrufer = Depends(require_master)) -> dict:
     if store.get_device(device_id) is None:
         raise HTTPException(404, "unbekanntes Geraet")
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
@@ -195,26 +236,36 @@ def patch_device(device_id: str, req: DeviceUpdate, actor: str = Depends(require
     # Die Push-URL ist ein Geheimnis - Pushcut-URLs enthalten den API-Key.
     # Ins Log gehoert nur, DASS sie geaendert wurde, nicht worauf.
     protokoll = {k: ("<gesetzt>" if k == "push_url" else v) for k, v in fields.items()}
-    store.audit(actor, "device.update", device_id, **protokoll)
+    store.audit(str(actor), "device.update", device_id, **protokoll)
     return device  # type: ignore[return-value]
 
 
 @app.post("/v1/devices/{device_id}/revoke")
-def revoke_device(device_id: str, actor: str = Depends(require_control)) -> dict:
+def revoke_device(device_id: str, actor: Aufrufer = Depends(require_master)) -> dict:
     if store.get_device(device_id) is None:
         raise HTTPException(404, "unbekanntes Geraet")
     store.revoke_device(device_id)
-    store.audit(actor, "device.revoke", device_id)
+    store.audit(str(actor), "device.revoke", device_id)
     return {"revoked": device_id}
 
 
 @app.post("/v1/devices/{device_id}/commands")
-def issue_command(device_id: str, req: CommandRequest, actor: str = Depends(require_control)) -> dict:
+def issue_command(device_id: str, req: CommandRequest, actor: Aufrufer = Depends(require_control)) -> dict:
     if killswitch_active():
         raise HTTPException(423, "Kill-Switch ist aktiv - der Hub nimmt keine Kommandos an")
     device = store.get_device(device_id)
     if device is None:
         raise HTTPException(404, "unbekanntes Geraet")
+    if not actor.darf_geraet(device_id):
+        store.audit(str(actor), "command.denied", device_id,
+                    kind=req.kind, reason="Token nicht fuer dieses Geraet")
+        raise HTTPException(403, "Dieses Token ist nicht fuer dieses Geraet freigegeben")
+    if req.kind not in security.MODE_KINDS.get(actor.ceiling, frozenset()):
+        store.audit(str(actor), "command.denied", device_id,
+                    kind=req.kind, reason=f"Token-Obergrenze '{actor.ceiling}'")
+        raise HTTPException(
+            403, f"Kommando abgelehnt: dieses Token reicht hoechstens bis "
+                 f"'{actor.ceiling}', '{req.kind}' liegt darueber")
     if device["revoked_at"]:
         raise HTTPException(403, "Geraet ist widerrufen")
     # Policy zuerst: ob ein Geraet enrolled ist, aendert nichts daran, dass ein
@@ -223,7 +274,7 @@ def issue_command(device_id: str, req: CommandRequest, actor: str = Depends(requ
         req.kind, device["mode"], device["capabilities"], req.payload, device["allowlist"]
     )
     if not verdict.allowed:
-        store.audit(actor, "command.denied", device_id, kind=req.kind, reason=verdict.reason)
+        store.audit(str(actor), "command.denied", device_id, kind=req.kind, reason=verdict.reason)
         raise HTTPException(403, f"Kommando abgelehnt: {verdict.reason}")
 
     # Reine Push-Ziele (iPhone ohne Kurzbefehl-Agent) haben kein Geraete-Token
@@ -234,8 +285,8 @@ def issue_command(device_id: str, req: CommandRequest, actor: str = Depends(requ
             409, "Geraet ist noch nicht enrolled (Enrollment-Code einloesen)"
         )
 
-    cmd = store.enqueue(device_id, req.kind, req.payload, req.timeout_s, issued_by=actor)
-    store.audit(actor, "command.issued", device_id, kind=req.kind, command_id=cmd["id"])
+    cmd = store.enqueue(device_id, req.kind, req.payload, req.timeout_s, issued_by=str(actor))
+    store.audit(str(actor), "command.issued", device_id, kind=req.kind, command_id=cmd["id"])
 
     # Mitteilungen gehen nicht in die Poll-Queue, sobald eine Push-URL
     # hinterlegt ist: Push erreicht iPhone und iPad auch im gesperrten
@@ -256,14 +307,14 @@ def issue_command(device_id: str, req: CommandRequest, actor: str = Depends(requ
                 result=outcome if delivered else None,
                 error=None if delivered else str(outcome.get("error", "Push fehlgeschlagen")),
             )
-            store.audit(actor, "notify.pushed", device_id, command_id=cmd["id"],
+            store.audit(str(actor), "notify.pushed", device_id, command_id=cmd["id"],
                         via=outcome.get("via"), delivered=delivered)
             return store.get_command(cmd["id"])  # type: ignore[return-value]
     return cmd
 
 
 @app.get("/v1/commands/{command_id}")
-def get_command(command_id: str, actor: str = Depends(require_control)) -> dict:
+def get_command(command_id: str, actor: Aufrufer = Depends(require_control)) -> dict:
     store.expire_stale()
     cmd = store.get_command(command_id)
     if cmd is None:
@@ -273,22 +324,68 @@ def get_command(command_id: str, actor: str = Depends(require_control)) -> dict:
 
 @app.get("/v1/commands")
 def list_commands(device_id: str | None = None, limit: int = 50,
-                  actor: str = Depends(require_control)) -> dict:
+                  actor: Aufrufer = Depends(require_control)) -> dict:
     store.expire_stale()
     return {"commands": store.list_commands(device_id, min(limit, 200))}
 
 
 @app.get("/v1/audit")
 def audit(limit: int = 100, device_id: str | None = None,
-          actor: str = Depends(require_control)) -> dict:
+          actor: Aufrufer = Depends(require_control)) -> dict:
     return {"entries": store.audit_tail(min(limit, 500), device_id)}
 
 
 @app.post("/v1/killswitch/{state}")
-def killswitch(state: Literal["on", "off"], actor: str = Depends(require_control)) -> dict:
+def killswitch(state: Literal["on", "off"], actor: Aufrufer = Depends(require_control)) -> dict:
+    """Not-Aus.
+
+    Einschalten darf jedes Control-Token - im Zweifel soll das Anhalten
+    nicht daran scheitern, dass gerade das Master-Token nicht zur Hand ist.
+    Ausschalten ist ein Verwaltungsvorgang und verlangt das Master-Token.
+    """
+    if state == "off" and actor.name != "control":
+        raise HTTPException(
+            403, "Den Not-Aus loesen darf nur das Master-Control-Token")
     store.set_setting("killswitch", state)
-    store.audit(actor, f"killswitch.{state}")
+    store.audit(str(actor), f"killswitch.{state}")
     return {"killswitch": state}
+
+
+class ControlTokenRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ceiling: Literal["notify", "readonly", "full"] = "readonly"
+    devices: list[str] = []
+
+
+@app.post("/v1/control-tokens")
+def issue_control_token(req: ControlTokenRequest,
+                        actor: Aufrufer = Depends(require_master)) -> dict:
+    """Stellt ein abgestuftes Control-Token aus.
+
+    Gedacht fuer Oberflaechen, die fremde Inhalte verarbeiten: Chat und
+    Cowork bekommen 'readonly', das Terminal behaelt das Master-Token.
+    """
+    for device_id in req.devices:
+        if store.get_device(device_id) is None:
+            raise HTTPException(404, f"unbekanntes Geraet: {device_id}")
+    token = store.create_control_token(req.label, req.ceiling, req.devices)
+    store.audit(str(actor), "control_token.issued", None,
+                label=req.label, ceiling=req.ceiling, devices=req.devices)
+    return {"token": token, "label": req.label, "ceiling": req.ceiling,
+            "devices": req.devices}
+
+
+@app.get("/v1/control-tokens")
+def list_control_tokens(actor: Aufrufer = Depends(require_master)) -> dict:
+    return {"tokens": store.list_control_tokens()}
+
+
+@app.delete("/v1/control-tokens/{label}")
+def revoke_control_token(label: str, actor: Aufrufer = Depends(require_master)) -> dict:
+    if store.revoke_control_token(label) == 0:
+        raise HTTPException(404, "unbekanntes oder bereits widerrufenes Token")
+    store.audit(str(actor), "control_token.revoked", None, label=label)
+    return {"revoked": label}
 
 
 # ---------------------------------------------------------------------------

@@ -508,7 +508,32 @@ def killswitch(state: str) -> str:
 
 
 def main() -> None:
-    server.run()
+    """Startet den Server - lokal ueber stdio, fern ueber HTTP.
+
+    stdio ist der Normalfall: Claude Code startet den Prozess selbst.
+    'streamable-http' brauchen Claude im Browser und Cowork, die einen
+    erreichbaren Endpunkt verlangen statt eines lokalen Prozesses.
+
+        CONNECTOR_MCP_TRANSPORT=streamable-http
+        CONNECTOR_MCP_BIND=172.18.0.1        # Docker-Gateway, nicht 0.0.0.0
+        CONNECTOR_MCP_PORT=8788
+        CONNECTOR_MCP_PATH=/mcp
+
+    Der Endpunkt hat KEINE eigene Authentifizierung - der Schutz liegt im
+    geheimen Pfad im Reverse-Proxy davor. Deshalb gehoert dort ein Token mit
+    Obergrenze hinein, nie das Master-Token.
+    """
+    transport = os.environ.get("CONNECTOR_MCP_TRANSPORT", "stdio")
+    if transport != "streamable-http":
+        server.run()
+        return
+    server.run(
+        transport="streamable-http",
+        host=os.environ.get("CONNECTOR_MCP_BIND", "127.0.0.1"),
+        port=int(os.environ.get("CONNECTOR_MCP_PORT", "8788")),
+        streamable_http_path=os.environ.get("CONNECTOR_MCP_PATH", "/mcp"),
+        stateless_http=True,
+    )
 
 
 if __name__ == "__main__":

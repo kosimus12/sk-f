@@ -466,3 +466,108 @@ def test_applescript_shell_scan_is_documented_as_best_effort():
     direkt = 'do shell script "rm -rf /"'
     assert not security.check_command(
         "app.applescript", "full", ["app"], {"script": direkt}).allowed
+
+
+# ---------------------------------------------------------------------------
+# Abgestufte Control-Tokens (fuer Chat und Cowork)
+# ---------------------------------------------------------------------------
+
+def issue_token(client, label="chat", ceiling="readonly", devices=None) -> str:
+    resp = client.post("/v1/control-tokens", json={
+        "label": label, "ceiling": ceiling, "devices": devices or []}, headers=ctl())
+    assert resp.status_code == 200, resp.text
+    return resp.json()["token"]
+
+
+def scoped(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_scoped_token_cannot_exceed_its_ceiling(client):
+    created = make_device(client)
+    enroll(client, created["enrollment_code"])
+    token = issue_token(client, ceiling="readonly")
+
+    # Lesen ist erlaubt ...
+    ok = client.post("/v1/devices/mac-test/commands",
+                     json={"kind": "fs.read", "payload": {"path": "/etc/hosts"}},
+                     headers=scoped(token))
+    assert ok.status_code == 200
+
+    # ... Shell und Schreiben nicht, obwohl das Geraet auf 'full' steht.
+    for kind, payload in (("shell", {"command": "ls"}),
+                          ("fs.write", {"path": "/tmp/x", "content": "y"})):
+        resp = client.post(f"/v1/devices/mac-test/commands",
+                           json={"kind": kind, "payload": payload},
+                           headers=scoped(token))
+        assert resp.status_code == 403, kind
+        assert "Obergrenze" in resp.json()["error"] or "reicht hoechstens" in resp.json()["error"]
+
+
+def test_scoped_token_can_be_limited_to_certain_devices(client):
+    a = make_device(client, "mac-a")
+    b = make_device(client, "mac-b")
+    enroll(client, a["enrollment_code"])
+    enroll(client, b["enrollment_code"])
+    token = issue_token(client, label="nur-a", ceiling="full", devices=["mac-a"])
+
+    assert client.post("/v1/devices/mac-a/commands",
+                       json={"kind": "shell", "payload": {"command": "ls"}},
+                       headers=scoped(token)).status_code == 200
+    resp = client.post("/v1/devices/mac-b/commands",
+                       json={"kind": "shell", "payload": {"command": "ls"}},
+                       headers=scoped(token))
+    assert resp.status_code == 403 and "nicht fuer dieses Geraet" in resp.json()["error"]
+
+
+def test_scoped_token_cannot_raise_its_own_reach(client):
+    """Sonst waere die Obergrenze wertlos: Geraet umstufen und fertig."""
+    created = make_device(client, "mac-test", mode="readonly")
+    enroll(client, created["enrollment_code"])
+    token = issue_token(client, ceiling="readonly")
+
+    # Kein Geraet anlegen, umstufen oder widerrufen ...
+    assert client.post("/v1/devices", json={
+        "device_id": "mac-neu", "label": "N", "platform": "macos", "mode": "full",
+    }, headers=scoped(token)).status_code == 403
+    assert client.patch("/v1/devices/mac-test", json={"mode": "full"},
+                        headers=scoped(token)).status_code == 403
+    assert client.post("/v1/devices/mac-test/revoke",
+                       headers=scoped(token)).status_code == 403
+    # ... und sich auch kein neues Token ausstellen.
+    assert client.post("/v1/control-tokens", json={"label": "mehr", "ceiling": "full"},
+                       headers=scoped(token)).status_code == 403
+
+
+def test_scoped_token_may_stop_but_not_restart(client):
+    """Anhalten soll nie am fehlenden Master-Token scheitern."""
+    token = issue_token(client, ceiling="readonly")
+    assert client.post("/v1/killswitch/on", headers=scoped(token)).status_code == 200
+    resp = client.post("/v1/killswitch/off", headers=scoped(token))
+    assert resp.status_code == 403
+    assert client.post("/v1/killswitch/off", headers=ctl()).status_code == 200
+
+
+def test_revoked_scoped_token_stops_working(client):
+    token = issue_token(client, label="weg")
+    assert client.get("/v1/devices", headers=scoped(token)).status_code == 200
+    assert client.delete("/v1/control-tokens/weg", headers=ctl()).status_code == 200
+    assert client.get("/v1/devices", headers=scoped(token)).status_code == 403
+
+
+def test_scoped_tokens_are_hashed_and_listed_without_the_secret(client):
+    token = issue_token(client, label="chat")
+    listing = client.get("/v1/control-tokens", headers=ctl()).json()["tokens"]
+    assert [t["label"] for t in listing] == ["chat"]
+    assert token not in client.get("/v1/control-tokens", headers=ctl()).text
+
+
+def test_denied_scoped_command_is_audited(client):
+    created = make_device(client)
+    enroll(client, created["enrollment_code"])
+    token = issue_token(client, label="chat", ceiling="readonly")
+    client.post("/v1/devices/mac-test/commands",
+                json={"kind": "shell", "payload": {"command": "ls"}}, headers=scoped(token))
+    eintraege = client.get("/v1/audit", headers=ctl()).json()["entries"]
+    treffer = [e for e in eintraege if e["action"] == "command.denied"]
+    assert treffer and treffer[0]["actor"] == "control:chat"

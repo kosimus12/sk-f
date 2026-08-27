@@ -153,6 +153,32 @@ def cmd_mode(args: argparse.Namespace) -> None:
     print(f"{out['id']}: Modus jetzt '{out['mode']}'")
 
 
+def cmd_token_issue(args: argparse.Namespace) -> None:
+    out = call("POST", "/v1/control-tokens", {
+        "label": args.label, "ceiling": args.ceiling,
+        "devices": [d for d in args.devices.split(",") if d],
+    })
+    print(f"Token '{out['label']}' ausgestellt (Obergrenze: {out['ceiling']}"
+          + (f", nur {', '.join(out['devices'])}" if out["devices"] else "") + ")")
+    print()
+    print("Einmalig angezeigt - jetzt kopieren:")
+    print("  " + out["token"])
+
+
+def cmd_token_list(args: argparse.Namespace) -> None:
+    for t in call("GET", "/v1/control-tokens")["tokens"]:
+        stand = "widerrufen" if t["revoked_at"] else "aktiv"
+        zuletzt = (time.strftime("%Y-%m-%d %H:%M", time.localtime(t["last_used"]))
+                   if t["last_used"] else "nie")
+        geraete = ",".join(t["devices"]) or "alle"
+        print(f"{t['label']:<20} {stand:<12} {t['ceiling']:<10} "
+              f"Geraete={geraete:<24} zuletzt={zuletzt}")
+
+
+def cmd_token_revoke(args: argparse.Namespace) -> None:
+    print(json.dumps(call("DELETE", f"/v1/control-tokens/{args.label}"), ensure_ascii=False))
+
+
 def cmd_killswitch(args: argparse.Namespace) -> None:
     print(json.dumps(call("POST", f"/v1/killswitch/{args.state}"), ensure_ascii=False))
 
@@ -216,6 +242,22 @@ def main() -> None:
     m.add_argument("device")
     m.add_argument("mode", choices=["notify", "readonly", "full"])
     m.set_defaults(func=cmd_mode)
+
+    ti = sub.add_parser("token-issue", help="abgestuftes Control-Token ausstellen")
+    ti.add_argument("label", help="z.B. chat, cowork")
+    ti.add_argument("--ceiling", default="readonly",
+                    choices=["notify", "readonly", "full"],
+                    help="Obergrenze - hoechstens das darf dieses Token")
+    ti.add_argument("--devices", default="",
+                    help="Komma-Liste; leer = alle Geraete")
+    ti.set_defaults(func=cmd_token_issue)
+
+    tl = sub.add_parser("token-list", help="ausgestellte Control-Tokens anzeigen")
+    tl.set_defaults(func=cmd_token_list)
+
+    tr = sub.add_parser("token-revoke", help="Control-Token widerrufen")
+    tr.add_argument("label")
+    tr.set_defaults(func=cmd_token_revoke)
 
     k = sub.add_parser("killswitch", help="Not-Aus fuer alle Geraete")
     k.add_argument("state", choices=["on", "off"])

@@ -1,0 +1,42 @@
+[Unit]
+Description=SK Connector MCP (Remote, fuer Claude Chat und Cowork)
+After=network-online.target skconnector-hub.service
+Wants=network-online.target
+Requires=skconnector-hub.service
+
+[Service]
+Type=exec
+User=skconnector
+Group=skconnector
+WorkingDirectory=/opt/skconnector
+
+Environment=CONNECTOR_MCP_TRANSPORT=streamable-http
+# Nicht 0.0.0.0: nur der Reverse-Proxy im Docker-Netz soll herankommen.
+Environment=CONNECTOR_MCP_BIND=172.18.0.1
+Environment=CONNECTOR_MCP_PORT=8788
+Environment=CONNECTOR_MCP_PATH=/mcp
+Environment=CONNECTOR_HUB_URL=http://127.0.0.1:8787
+
+# WICHTIG: hier gehoert ein ABGESTUFTES Token hinein, nie das Master-Token.
+#   skconnect.py token-issue chat --ceiling readonly
+# Datei anlegen mit 0640 root:skconnector.
+EnvironmentFile=/etc/skconnector/mcp.env
+
+ExecStart=/opt/skconnector/venv/bin/python /opt/skconnector/mcp-server/server.py
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

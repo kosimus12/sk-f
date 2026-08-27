@@ -60,6 +60,8 @@ connector/
 └── tests/        Unit-Tests und ein End-to-End-Rauchtest
 
 ANLEITUNG.md      Einrichtung beider Macs: lesen+schreiben, Browser, Programme
+REMOTE-MCP.md     Claude Chat und Cowork anbinden (abgestufte Tokens)
+SECURITY-REVIEW.md  Due Diligence, Befunde und verbleibende Risiken
 RUNBOOK.md        Kurzfassung der Einrichtung
 SECURITY.md       Sicherheitsmodell, Grenzen, Empfehlungen
 ```
@@ -317,7 +319,7 @@ Ausführlich in [`SECURITY.md`](SECURITY.md). Die Kurzfassung:
 
 ```bash
 cd connector
-python3 -m pytest tests -q        # 83 Tests: Policy, Store, API, AppleScript
+python3 -m pytest tests -q        # 115 Tests: Policy, Store, API, AppleScript
 bash tests/smoke_e2e.sh           # echter Durchstich: Hub + Agent + CLI
 ```
 
