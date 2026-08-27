@@ -169,6 +169,11 @@ fi
 # Falls ein frueherer Lauf das Hub-venv beschaedigt hat: wiederherstellen.
 if ! "$APP_DIR/venv/bin/pip" check >/dev/null 2>&1; then
   warn "Hub-venv ist beschaedigt - stelle die gepinnten Versionen wieder her."
+  # Zuerst die MCP-Pakete raus. Ein blosses --force-reinstall der gepinnten
+  # Versionen laesst sie als Waisen zurueck, und 'pip check' meckert weiter -
+  # zu Recht, denn beim naechsten pip-Lauf ziehen sie starlette wieder hoch.
+  "$APP_DIR/venv/bin/pip" uninstall -q -y mcp mcp-types sse-starlette \
+      >/dev/null 2>&1 || true
   "$APP_DIR/venv/bin/pip" install -q --force-reinstall \
       -r "$APP_DIR/hub/requirements.txt"
   systemctl restart skconnector-hub
@@ -177,10 +182,15 @@ if ! "$APP_DIR/venv/bin/pip" check >/dev/null 2>&1; then
     sleep 1
   done
   curl -sf --max-time 5 "$HUB_URL/healthz" >/dev/null \
-    && ok "Hub-venv repariert, Hub laeuft wieder" \
     || { fehler "Hub kommt nach der Reparatur nicht hoch:"
          journalctl -u skconnector-hub -n 20 --no-pager | sed 's/^/    /'
          exit 1; }
+  if "$APP_DIR/venv/bin/pip" check >/dev/null 2>&1; then
+    ok "Hub-venv repariert, Hub laeuft wieder"
+  else
+    warn "Hub laeuft, aber pip check meldet weiterhin:"
+    "$APP_DIR/venv/bin/pip" check | sed 's/^/    /'
+  fi
 fi
 
 cp "$SRC_DIR/hub/deploy/skconnector-mcp.service" /etc/systemd/system/
@@ -200,19 +210,28 @@ fi
 schritt "6/7  Geheimen Pfad erzeugen"
 
 GEHEIM="$(openssl rand -hex 32)"
-HOSTNAME_MCP="mcp.$(hostname -I | awk '{print $1}').sslip.io"
-ok "Pfad erzeugt (steht unten im Caddy-Block)"
+
+# 'hostname -I' listet auch Docker-Bruecken auf. Die oeffentliche Adresse ist
+# die, ueber die die Standardroute laeuft - sonst baut sich der Name aus
+# 172.18.0.1 und Let's Encrypt kann nichts damit anfangen.
+OEFFENTLICH="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="src") print $(i+1); exit}')"
+[[ -n "$OEFFENTLICH" ]] || OEFFENTLICH="$(hostname -I | awk '{print $1}')"
+HOSTNAME_MCP="mcp.${OEFFENTLICH}.sslip.io"
+ok "Oeffentliche Adresse: $OEFFENTLICH -> $HOSTNAME_MCP"
+ok "Geheimer Pfad erzeugt"
 
 # ---------------------------------------------------------------------------
 schritt "7/7  Was du jetzt von Hand machst"
 
 CADDYFILE="$(docker inspect "${CADDY:-x}" -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
 
-cat <<TEXT
-
-    Diesen Block an ${CADDYFILE:-deinen Caddyfile} anhaengen:
-
-mcp.HOSTNAME {
+# Der Block wird FERTIG in eine Datei geschrieben - kein Platzhalter, den
+# jemand von Hand ersetzen muesste. Genau daran scheitert es sonst: der Block
+# landet mit 'mcp.HOSTNAME' im Caddyfile, Caddy hat kein Zertifikat fuer den
+# echten Namen, und curl antwortet mit 000 statt 404.
+BLOCK=/etc/skconnector/caddy-mcp.conf
+cat > "$BLOCK" <<CADDYEOF
+$HOSTNAME_MCP {
     handle_path /$GEHEIM/* {
         reverse_proxy $GATEWAY:$PORT {
             transport http {
@@ -225,15 +244,42 @@ mcp.HOSTNAME {
         respond "Not found" 404
     }
 }
+CADDYEOF
+chmod 0600 "$BLOCK"
+ok "Fertiger Caddy-Block liegt in $BLOCK"
 
-    Vorschlag fuer HOSTNAME (kein DNS-Eintrag noetig):
-        $HOSTNAME_MCP
+if [[ -n "$CADDYFILE" && -f "$CADDYFILE" ]]; then
+  if grep -q "^$HOSTNAME_MCP" "$CADDYFILE"; then
+    warn "$CADDYFILE enthaelt bereits einen Block fuer $HOSTNAME_MCP."
+    warn "Den alten Block entfernen, dann den neuen anhaengen:"
+    ANHAENGEN="sudo nano $CADDYFILE   # alten Block loeschen, danach:
+        cat $BLOCK >> $CADDYFILE"
+  else
+    ANHAENGEN="cat $BLOCK >> $CADDYFILE"
+  fi
+else
+  ANHAENGEN="cat $BLOCK >> DEIN-CADDYFILE"
+fi
 
-    Danach neu laden:
+cat <<TEXT
+
+    1) Block anhaengen:
+
+        $ANHAENGEN
+
+    2) Caddy neu laden:
+
         docker exec ${CADDY:-CADDY-CONTAINER} caddy reload --config /etc/caddy/Caddyfile
 
-    Und in Claude eintragen unter Einstellungen > Connectors >
-    Custom Connector hinzufuegen:
+    3) Gegenprobe (muss 404 sein, nicht 000):
+
+        curl -s -o /dev/null -w '%{http_code}\n' https://$HOSTNAME_MCP/
+
+       000 = Caddy kennt den Namen nicht, der Block fehlt oder wurde nicht geladen.
+       404 = Site steht, Zertifikat da, geheimer Pfad schuetzt den Rest.
+
+    4) In Claude eintragen unter Einstellungen > Connectors >
+       Custom Connector hinzufuegen:
 
         Name:  SK Connector
         URL:   https://$HOSTNAME_MCP/$GEHEIM/mcp

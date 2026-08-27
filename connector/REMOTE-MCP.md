@@ -60,9 +60,15 @@ Das Skript erledigt alles, was sich automatisieren lässt:
 2. findet den Caddy-Container und dessen Netz-Gateway
 3. stellt das abgestufte Token aus und legt es in `/etc/skconnector/mcp.env`
    (0640 root:skconnector) — **nie** in `hub.env`
-4. installiert den Dienst `skconnector-mcp` und prüft, dass er lauscht
-5. erzeugt einen geheimen Pfad mit `openssl rand -hex 32`
-6. druckt den fertigen Caddy-Block und die Connector-URL
+4. installiert den Dienst `skconnector-mcp` in ein **eigenes venv** und prüft,
+   dass er lauscht — im gemeinsamen venv zieht das MCP-SDK starlette hoch und
+   der Hub fällt beim nächsten Neustart aus; ein beschädigtes Hub-venv räumt
+   das Skript auf
+5. erzeugt einen geheimen Pfad mit `openssl rand -hex 32` und ermittelt die
+   öffentliche Adresse über die Standardroute (nicht über `hostname -I`, das
+   auch Docker-Brücken auflistet)
+6. schreibt den **fertigen** Caddy-Block nach `/etc/skconnector/caddy-mcp.conf`
+   — mit echtem Hostnamen, ohne Platzhalter — und druckt die Connector-URL
 
 Enger einstellen geht über die Argumente:
 
@@ -74,10 +80,21 @@ sudo bash hub/deploy/install-mcp.sh --label chat --ceiling readonly --devices ma
 sudo bash hub/deploy/install-mcp.sh --label chat --ceiling notify
 ```
 
-Was **nicht** automatisch geht: der Caddy-Block. Der Caddyfile gehört einem
+Was **nicht** automatisch geht: das Einfügen in den Caddyfile. Der gehört einem
 anderen Stack (`alex-mail-mcp`), und ein Skript, das fremde Konfiguration
-umschreibt, ist ein Skript, das irgendwann etwas kaputt macht. Das Skript
-druckt den Block fertig aus, einfügen musst du ihn selbst.
+umschreibt, ist ein Skript, das irgendwann etwas kaputt macht. Der Block liegt
+fertig in `/etc/skconnector/caddy-mcp.conf`, anhängen und neu laden musst du
+selbst:
+
+```bash
+cat /etc/skconnector/caddy-mcp.conf >> /opt/alex-mail-mcp/Caddyfile
+docker exec alex-mail-mcp-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+curl -s -o /dev/null -w '%{http_code}\n' https://mcp.138.199.230.178.sslip.io/
+```
+
+Die Gegenprobe muss **404** liefern. **000** heißt: Caddy kennt den Namen gar
+nicht — der Block fehlt im Caddyfile oder wurde nicht geladen, und deshalb gibt
+es auch kein Zertifikat für den Namen. Kein Netzwerkproblem, ein Konfigproblem.
 
 ### 4. Als Custom Connector eintragen
 
