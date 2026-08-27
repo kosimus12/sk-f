@@ -149,8 +149,39 @@ ok "$CONF/mcp.env geschrieben (0640 root:skconnector)"
 schritt "5/7  Dienst installieren"
 
 cp -r "$SRC_DIR/mcp-server" "$APP_DIR/"
-"$APP_DIR/venv/bin/pip" install -q -r "$APP_DIR/mcp-server/requirements.txt"
 chown -R root:skconnector "$APP_DIR/mcp-server"
+
+# EIGENES venv, nicht das des Hubs. Das MCP-SDK zieht starlette auf 1.x,
+# FastAPI 0.115 verlangt <0.42 - im gemeinsamen venv zerschiesst die eine
+# Installation die andere, und der Hub faellt beim naechsten Neustart aus.
+if [[ ! -x "$APP_DIR/venv-mcp/bin/python" ]]; then
+  python3 -m venv "$APP_DIR/venv-mcp"
+fi
+"$APP_DIR/venv-mcp/bin/pip" install -q --upgrade pip
+"$APP_DIR/venv-mcp/bin/pip" install -q -r "$APP_DIR/mcp-server/requirements.txt"
+chown -R root:skconnector "$APP_DIR/venv-mcp"
+
+if ! "$APP_DIR/venv-mcp/bin/pip" check >/dev/null 2>&1; then
+  warn "pip check im MCP-venv meldet Konflikte:"
+  "$APP_DIR/venv-mcp/bin/pip" check | sed 's/^/    /'
+fi
+
+# Falls ein frueherer Lauf das Hub-venv beschaedigt hat: wiederherstellen.
+if ! "$APP_DIR/venv/bin/pip" check >/dev/null 2>&1; then
+  warn "Hub-venv ist beschaedigt - stelle die gepinnten Versionen wieder her."
+  "$APP_DIR/venv/bin/pip" install -q --force-reinstall \
+      -r "$APP_DIR/hub/requirements.txt"
+  systemctl restart skconnector-hub
+  for _ in $(seq 1 20); do
+    curl -sf --max-time 3 "$HUB_URL/healthz" >/dev/null && break
+    sleep 1
+  done
+  curl -sf --max-time 5 "$HUB_URL/healthz" >/dev/null \
+    && ok "Hub-venv repariert, Hub laeuft wieder" \
+    || { fehler "Hub kommt nach der Reparatur nicht hoch:"
+         journalctl -u skconnector-hub -n 20 --no-pager | sed 's/^/    /'
+         exit 1; }
+fi
 
 cp "$SRC_DIR/hub/deploy/skconnector-mcp.service" /etc/systemd/system/
 systemctl daemon-reload

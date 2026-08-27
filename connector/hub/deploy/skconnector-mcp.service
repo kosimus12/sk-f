@@ -22,7 +22,8 @@ Environment=CONNECTOR_HUB_URL=http://127.0.0.1:8787
 # Datei anlegen mit 0640 root:skconnector.
 EnvironmentFile=/etc/skconnector/mcp.env
 
-ExecStart=/opt/skconnector/venv/bin/python /opt/skconnector/mcp-server/server.py
+# Eigenes venv: das MCP-SDK und FastAPI vertragen sich nicht in einem.
+ExecStart=/opt/skconnector/venv-mcp/bin/python /opt/skconnector/mcp-server/server.py
 Restart=always
 RestartSec=3
 
