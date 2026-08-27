@@ -125,6 +125,18 @@ def cmd_probe(args: argparse.Namespace) -> None:
                      indent=2, ensure_ascii=False))
 
 
+def cmd_permissions(args: argparse.Namespace) -> None:
+    cmd = dispatch_and_wait(args.device, "permissions", {}, 90)
+    if cmd["status"] != "done":
+        sys.exit(f"[{cmd['status']}] {cmd.get('error')}")
+    for name, info in cmd["result"].items():
+        mark = {True: "OK   ", False: "FEHLT", None: "--   "}[info.get("ok")]
+        detail = info.get("hinweis")
+        if detail is None:
+            detail = info.get("wert")
+        print(f"{mark} {name:<28} {detail if detail is not None else ''}")
+
+
 def cmd_revoke(args: argparse.Namespace) -> None:
     print(json.dumps(call("POST", f"/v1/devices/{args.device}/revoke"), ensure_ascii=False))
 
@@ -184,6 +196,10 @@ def main() -> None:
     pr = sub.add_parser("probe", help="Systemfakten live abfragen")
     pr.add_argument("device")
     pr.set_defaults(func=cmd_probe)
+
+    pm = sub.add_parser("permissions", help="macOS-Freigaben eines Macs pruefen")
+    pm.add_argument("device")
+    pm.set_defaults(func=cmd_permissions)
 
     rv = sub.add_parser("revoke", help="Geraet sofort abklemmen")
     rv.add_argument("device")

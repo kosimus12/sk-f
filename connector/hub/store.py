@@ -307,14 +307,30 @@ class Store:
             )
         return self.get_command(cid)  # type: ignore[return-value]
 
-    def claim_next(self, device_id: str, limit: int = 1) -> list[dict]:
-        """Nimmt bis zu `limit` wartende Kommandos fuer ein Geraet an."""
+    def claim_next(self, device_id: str, limit: int = 1,
+                   kinds: list[str] | None = None) -> list[dict]:
+        """Nimmt bis zu `limit` wartende Kommandos fuer ein Geraet an.
+
+        `kinds` grenzt auf die Arten ein, die der fragende Prozess auch
+        ausfuehren kann. Auf dem Mac laufen zwei Prozesse mit demselben
+        Token: der System-Daemon (Shell, Dateien) und - optional - ein
+        Prozess in der Benutzersitzung (Browser, Mail). Ohne diesen Filter
+        wuerde der eine Auftraege des anderen wegschnappen.
+        """
         with self.conn() as c:
-            rows = c.execute(
-                "SELECT * FROM commands WHERE device_id=? AND status='queued'"
-                " ORDER BY created_at LIMIT ?",
-                (device_id, limit),
-            ).fetchall()
+            if kinds:
+                placeholders = ",".join("?" * len(kinds))
+                rows = c.execute(
+                    f"SELECT * FROM commands WHERE device_id=? AND status='queued'"
+                    f" AND kind IN ({placeholders}) ORDER BY created_at LIMIT ?",
+                    (device_id, *kinds, limit),
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT * FROM commands WHERE device_id=? AND status='queued'"
+                    " ORDER BY created_at LIMIT ?",
+                    (device_id, limit),
+                ).fetchall()
             claimed = []
             for r in rows:
                 c.execute(

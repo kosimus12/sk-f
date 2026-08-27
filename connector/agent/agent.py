@@ -29,12 +29,73 @@ import urllib.error
 import urllib.request
 
 DEFAULT_STATE = "/etc/skconnector/agent.json"
-USER_AGENT = "sk-connector-agent/1.0"
-
-# Faehigkeiten, die dieser Agent tatsaechlich implementiert.
-CAPABILITIES = ["shell", "fs", "notify", "probe"]
+USER_AGENT = "sk-connector-agent/1.1"
 
 MAX_OUTPUT_BYTES = 256 * 1024  # 256 KiB pro Kommando, danach wird gekuerzt
+
+# ---------------------------------------------------------------------------
+# Rollen
+#
+# Auf dem Mac koennen zwei Prozesse mit demselben Token laufen:
+#   system - LaunchDaemon als root: Shell und Dateien, laeuft auch am
+#            Login-Fenster und bei gesperrtem Bildschirm.
+#   user   - optionaler LaunchAgent in der Benutzersitzung: Browser und
+#            Mail.app. Apple Events an laufende Programme brauchen eine
+#            Sitzung; als reiner Daemon scheitern sie je nach TCC-Zustand.
+# Standard ist 'all' - ein Prozess macht beides und schickt GUI-Kommandos
+# ueber 'launchctl asuser' in die Sitzung des angemeldeten Benutzers.
+# ---------------------------------------------------------------------------
+
+SYSTEM_KINDS = ["shell", "fs.list", "fs.read", "fs.write", "probe", "permissions"]
+USER_KINDS = [
+    "notify",
+    "browser.tabs", "browser.read", "browser.open", "browser.js", "browser.close",
+    "mail.accounts", "mail.mailboxes", "mail.list", "mail.search", "mail.read",
+    "mail.draft", "mail.send",
+]
+
+SYSTEM_CAPS = ["shell", "fs", "probe"]
+USER_CAPS = ["notify", "browser", "mail"]
+
+
+def role() -> str:
+    value = os.environ.get("CONNECTOR_ROLE", "all").lower()
+    return value if value in ("system", "user", "all") else "all"
+
+
+def handled_kinds() -> list[str]:
+    current = role()
+    kinds = []
+    if current in ("system", "all"):
+        kinds += SYSTEM_KINDS
+    if current in ("user", "all"):
+        kinds += USER_KINDS
+    if platform.system() != "Darwin":
+        # Browser und Mail laufen ueber AppleScript - anderswo gibt es sie nicht.
+        kinds = [k for k in kinds if not k.startswith(("browser.", "mail."))]
+    if not mail_send_allowed():
+        kinds = [k for k in kinds if k != "mail.send"]
+    return kinds
+
+
+def capabilities() -> list[str]:
+    current = role()
+    caps = []
+    if current in ("system", "all"):
+        caps += SYSTEM_CAPS
+    if current in ("user", "all"):
+        caps += USER_CAPS
+    if platform.system() != "Darwin":
+        # Browser- und Mail-Steuerung gibt es nur ueber AppleScript.
+        caps = [c for c in caps if c not in ("browser", "mail")]
+    if mail_send_allowed() and "mail" in caps:
+        caps.append("mail.send")
+    return caps
+
+
+def mail_send_allowed() -> bool:
+    """Mails verschicken ist eine eigene Freigabe, nicht Teil von 'Mail lesen'."""
+    return os.environ.get("CONNECTOR_ALLOW_MAIL_SEND") == "1"
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +336,359 @@ def run_notify(payload: dict) -> dict:
     return {"delivered": proc.returncode == 0, "user": user, "stderr": proc.stderr.strip()}
 
 
+# ---------------------------------------------------------------------------
+# AppleScript: Browser und Mail.app
+# ---------------------------------------------------------------------------
+
+SEP = "|~|"          # Feldtrenner - kommt in Betreffs und URLs praktisch nie vor
+REC = "␞"       # Datensatztrenner (Unicode RECORD SEPARATOR SYMBOL)
+
+
+class AppleScriptError(RuntimeError):
+    """AppleScript hat einen Fehler zurueckgegeben."""
+
+
+def as_literal(value: str) -> str:
+    """Wert als AppleScript-Stringliteral - Anfuehrungszeichen entschaerft."""
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    escaped = escaped.replace("\r", " ").replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def run_osascript(script: str, timeout: int = 60) -> str:
+    """Fuehrt AppleScript aus - notfalls in der Sitzung des angemeldeten Nutzers.
+
+    Als root laufender Daemon: Apple Events brauchen eine GUI-Sitzung, deshalb
+    der Umweg ueber 'launchctl asuser'. Laeuft der Agent bereits als Benutzer
+    (Rolle 'user'), wird direkt aufgerufen.
+    """
+    argv = ["/usr/bin/osascript", "-"]
+    if os.getuid() == 0:
+        _user, uid = console_user()
+        if uid is None:
+            raise AppleScriptError(
+                "Niemand ist angemeldet - Browser und Mail sind nur in einer "
+                "aktiven Benutzersitzung erreichbar (gesperrter Bildschirm ist ok)."
+            )
+        argv = ["/bin/launchctl", "asuser", str(uid)] + argv
+
+    proc = subprocess.run(argv, input=script, capture_output=True, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        message = proc.stderr.strip() or f"osascript endete mit {proc.returncode}"
+        if "-1743" in message or "Not authorized to send Apple events" in message:
+            raise AppleScriptError(
+                f"{message}\n\nMacOS blockiert die Steuerung. Einmalig auf dem Mac "
+                "freigeben: Systemeinstellungen > Datenschutz & Sicherheit > "
+                "Automation. Falls der Eintrag fehlt, "
+                "'bash grant-permissions.sh' in der Benutzersitzung ausfuehren."
+            )
+        if "-1728" in message:
+            raise AppleScriptError(f"{message} (Objekt nicht gefunden - Tab oder Mail weg?)")
+        raise AppleScriptError(message)
+    return proc.stdout
+
+
+def parse_records(raw: str, fields: list[str]) -> list[dict]:
+    """Zerlegt die Textausgabe eines AppleScripts in Woerterbuecher."""
+    records = []
+    for line in raw.split(REC):
+        line = line.strip("\n")
+        if not line.strip():
+            continue
+        parts = line.split(SEP)
+        if len(parts) < len(fields):
+            parts += [""] * (len(fields) - len(parts))
+        records.append(dict(zip(fields, (p.strip() for p in parts[: len(fields)]))))
+    return records
+
+
+# -- Browser ----------------------------------------------------------------
+
+CHROMIUM = ("Google Chrome", "Brave Browser", "Microsoft Edge", "Arc")
+
+
+def browser_script_tabs(app: str) -> str:
+    title_prop = "title" if app in CHROMIUM else "name"
+    return f'''
+set out to ""
+tell application {as_literal(app)}
+    repeat with w from 1 to (count of windows)
+        repeat with t from 1 to (count of tabs of window w)
+            set theTab to tab t of window w
+            set out to out & w & {as_literal(SEP)} & t & {as_literal(SEP)} & ¬
+                ({title_prop} of theTab) & {as_literal(SEP)} & (URL of theTab) & {as_literal(REC)}
+        end repeat
+    end repeat
+end tell
+return out
+'''
+
+
+def browser_script_js(app: str, script: str, window: int, tab: int) -> str:
+    js = as_literal(script)
+    if app in CHROMIUM:
+        return f'''
+tell application {as_literal(app)}
+    set r to execute tab {tab} of window {window} javascript {js}
+    if r is missing value then return ""
+    return r as text
+end tell
+'''
+    return f'''
+tell application {as_literal(app)}
+    set r to do JavaScript {js} in tab {tab} of window {window}
+    if r is missing value then return ""
+    return r as text
+end tell
+'''
+
+
+def run_browser(kind: str, payload: dict, timeout: int) -> dict:
+    app = payload.get("app", "Safari")
+    window = int(payload.get("window", 1))
+    tab = int(payload.get("tab", 0))
+
+    if kind == "browser.tabs":
+        raw = run_osascript(browser_script_tabs(app), timeout)
+        tabs = parse_records(raw, ["window", "tab", "title", "url"])
+        return {"app": app, "count": len(tabs), "tabs": tabs}
+
+    if kind == "browser.open":
+        url = payload["url"]
+        script = f'tell application {as_literal(app)}\n activate\n open location {as_literal(url)}\nend tell'
+        run_osascript(script, timeout)
+        return {"app": app, "opened": url}
+
+    if kind == "browser.close":
+        script = f'tell application {as_literal(app)} to close tab {tab or 1} of window {window}'
+        run_osascript(script, timeout)
+        return {"app": app, "closed": {"window": window, "tab": tab or 1}}
+
+    if kind in ("browser.read", "browser.js"):
+        if tab == 0:
+            tab = _front_tab_index(app, window, timeout)
+        script = (
+            payload["script"] if kind == "browser.js"
+            else "document.body ? document.body.innerText : document.documentElement.innerText"
+        )
+        raw = run_osascript(browser_script_js(app, script, window, tab), timeout)
+        text, truncated = _truncate(raw)
+        return {"app": app, "window": window, "tab": tab,
+                "result": text, "truncated": truncated}
+
+    raise ValueError(f"unbekannte Browser-Operation: {kind}")
+
+
+def _front_tab_index(app: str, window: int, timeout: int) -> int:
+    """Index des aktiven Tabs - Safari und Chrome nennen ihn unterschiedlich."""
+    if app in CHROMIUM:
+        script = f'tell application {as_literal(app)} to return active tab index of window {window}'
+    else:
+        script = f'''
+tell application {as_literal(app)}
+    set theTab to current tab of window {window}
+    repeat with t from 1 to (count of tabs of window {window})
+        if tab t of window {window} is theTab then return t
+    end repeat
+end tell
+return 1
+'''
+    try:
+        return int(run_osascript(script, timeout).strip() or 1)
+    except (AppleScriptError, ValueError):
+        return 1
+
+
+# -- Mail.app ---------------------------------------------------------------
+
+def mail_script_list(mailbox: str, account: str, limit: int, unread_only: bool) -> str:
+    if account:
+        box = f'mailbox {as_literal(mailbox)} of account {as_literal(account)}'
+    else:
+        box = as_literal(mailbox) if mailbox.lower() != "inbox" else "inbox"
+        if mailbox.lower() != "inbox":
+            box = f"mailbox {box}"
+    selector = "(messages of theBox whose read status is false)" if unread_only else "(messages of theBox)"
+    return f'''
+set out to ""
+tell application "Mail"
+    set theBox to {box}
+    set msgs to {selector}
+    set n to (count of msgs)
+    if n > {int(limit)} then set n to {int(limit)}
+    repeat with i from 1 to n
+        set m to item i of msgs
+        try
+            set out to out & (id of m) & {as_literal(SEP)} & (subject of m) & {as_literal(SEP)} & ¬
+                (sender of m) & {as_literal(SEP)} & ((date received of m) as string) & {as_literal(SEP)} & ¬
+                (read status of m) & {as_literal(SEP)} & (name of mailbox of m) & {as_literal(REC)}
+        end try
+    end repeat
+end tell
+return out
+'''
+
+
+def mail_script_read(message_id: str, mailbox: str, account: str) -> str:
+    if account:
+        box = f'mailbox {as_literal(mailbox)} of account {as_literal(account)}'
+    elif mailbox.lower() != "inbox":
+        box = f'mailbox {as_literal(mailbox)}'
+    else:
+        box = "inbox"
+    return f'''
+tell application "Mail"
+    set theBox to {box}
+    set m to (first message of theBox whose id is {int(message_id)})
+    return (subject of m) & {as_literal(SEP)} & (sender of m) & {as_literal(SEP)} & ¬
+        ((date received of m) as string) & {as_literal(SEP)} & (content of m)
+end tell
+'''
+
+
+def mail_script_compose(payload: dict, send: bool) -> str:
+    recipients = payload.get("to") or []
+    if isinstance(recipients, str):
+        recipients = [recipients]
+    lines = [
+        'tell application "Mail"',
+        f'    set m to make new outgoing message with properties '
+        f'{{subject:{as_literal(payload.get("subject", ""))}, '
+        f'content:{as_literal(payload.get("body", ""))}, visible:true}}',
+        "    tell m",
+    ]
+    for address in recipients:
+        lines.append(
+            f'        make new to recipient at end of to recipients '
+            f'with properties {{address:{as_literal(address)}}}'
+        )
+    for address in (payload.get("cc") or []):
+        lines.append(
+            f'        make new cc recipient at end of cc recipients '
+            f'with properties {{address:{as_literal(address)}}}'
+        )
+    lines.append("    end tell")
+    if payload.get("from"):
+        lines.append(f'    set sender of m to {as_literal(payload["from"])}')
+    lines.append("    send m" if send else "    save m")
+    lines.append('    return "ok"')
+    lines.append("end tell")
+    return "\n".join(lines)
+
+
+def run_mail(kind: str, payload: dict, timeout: int) -> dict:
+    mailbox = str(payload.get("mailbox", "inbox"))
+    account = str(payload.get("account", ""))
+
+    if kind == "mail.accounts":
+        raw = run_osascript(
+            f'set out to ""\ntell application "Mail"\n'
+            f'  repeat with a in accounts\n'
+            f'    set out to out & (name of a) & {as_literal(SEP)} & '
+            f'(user name of a) & {as_literal(SEP)} & (enabled of a) & {as_literal(REC)}\n'
+            f'  end repeat\nend tell\nreturn out', timeout)
+        return {"accounts": parse_records(raw, ["name", "user", "enabled"])}
+
+    if kind == "mail.mailboxes":
+        scope = f'account {as_literal(account)}' if account else "application \"Mail\""
+        raw = run_osascript(
+            f'set out to ""\ntell {scope}\n'
+            f'  repeat with b in mailboxes\n'
+            f'    set out to out & (name of b) & {as_literal(REC)}\n'
+            f'  end repeat\nend tell\nreturn out', timeout)
+        return {"mailboxes": [r["name"] for r in parse_records(raw, ["name"])]}
+
+    if kind == "mail.list":
+        limit = min(int(payload.get("limit", 25)), 200)
+        raw = run_osascript(
+            mail_script_list(mailbox, account, limit, bool(payload.get("unread_only"))),
+            timeout)
+        return {"mailbox": mailbox, "messages": parse_records(
+            raw, ["id", "subject", "sender", "received", "read", "mailbox"])}
+
+    if kind == "mail.search":
+        # Bewusst ein Scan der letzten N Nachrichten statt eines 'whose'-Filters:
+        # Mail.app braucht fuer verschachtelte Filter ueber grosse Postfaecher
+        # Minuten und laeuft dabei regelmaessig in den Timeout.
+        scan = min(int(payload.get("scan", 150)), 500)
+        query = str(payload["query"]).lower()
+        raw = run_osascript(mail_script_list(mailbox, account, scan, False), timeout)
+        found = [
+            m for m in parse_records(raw, ["id", "subject", "sender", "received", "read", "mailbox"])
+            if query in m["subject"].lower() or query in m["sender"].lower()
+        ]
+        return {"mailbox": mailbox, "scanned": scan, "query": payload["query"],
+                "messages": found[: int(payload.get("limit", 25))]}
+
+    if kind == "mail.read":
+        raw = run_osascript(mail_script_read(str(payload["id"]), mailbox, account), timeout)
+        parts = raw.split(SEP)
+        while len(parts) < 4:
+            parts.append("")
+        body, truncated = _truncate(parts[3])
+        return {"subject": parts[0].strip(), "sender": parts[1].strip(),
+                "received": parts[2].strip(), "body": body, "truncated": truncated}
+
+    if kind in ("mail.draft", "mail.send"):
+        send = kind == "mail.send"
+        run_osascript(mail_script_compose(payload, send), timeout)
+        recipients = payload.get("to")
+        return {"sent" if send else "drafted": True,
+                "to": [recipients] if isinstance(recipients, str) else recipients,
+                "subject": payload.get("subject", "")}
+
+    raise ValueError(f"unbekannte Mail-Operation: {kind}")
+
+
+# -- Berechtigungen ---------------------------------------------------------
+
+def check_permissions() -> dict:
+    """Prueft, was macOS diesem Agenten tatsaechlich erlaubt.
+
+    Gedacht fuer die Einrichtung: sagt vor dem ersten echten Kommando, welche
+    Freigabe noch fehlt, statt es an einer kryptischen Fehlernummer scheitern
+    zu lassen.
+    """
+    results: dict[str, dict] = {}
+
+    def probe_app(label: str, script: str) -> None:
+        try:
+            run_osascript(script, timeout=20)
+            results[label] = {"ok": True}
+        except AppleScriptError as exc:
+            results[label] = {"ok": False, "hinweis": str(exc).split("\n")[0]}
+        except Exception as exc:
+            results[label] = {"ok": False, "hinweis": f"{type(exc).__name__}: {exc}"}
+
+    probe_app("mail", 'tell application "Mail" to return (count of accounts) as text')
+    for app in ("Safari", "Google Chrome"):
+        probe_app(f"browser:{app}",
+                  f'tell application {as_literal(app)} to return (count of windows) as text')
+
+    # Festplattenvollzugriff: ohne ihn bleiben Mail-Ablage und viele
+    # Benutzerordner fuer den Daemon unsichtbar.
+    user, _uid = console_user()
+    mail_dir = f"/Users/{user}/Library/Mail" if user else None
+    if mail_dir and os.path.isdir(mail_dir):
+        try:
+            os.listdir(mail_dir)
+            results["festplattenvollzugriff"] = {"ok": True}
+        except PermissionError:
+            results["festplattenvollzugriff"] = {
+                "ok": False,
+                "hinweis": "Systemeinstellungen > Datenschutz & Sicherheit > "
+                           "Festplattenvollzugriff: /bin/bash und /usr/bin/python3 hinzufuegen",
+            }
+    else:
+        results["festplattenvollzugriff"] = {"ok": None, "hinweis": "nicht pruefbar"}
+
+    results["angemeldeter_benutzer"] = {"ok": user is not None, "wert": user}
+    results["bildschirm_gesperrt"] = {"ok": None, "wert": screen_locked()}
+    results["rolle"] = {"ok": None, "wert": role()}
+    results["mail_senden_freigegeben"] = {"ok": None, "wert": mail_send_allowed()}
+    return results
+
+
 def execute(command: dict) -> tuple[dict | None, str | None]:
     kind = command["kind"]
     payload = command.get("payload", {}) or {}
@@ -288,7 +702,20 @@ def execute(command: dict) -> tuple[dict | None, str | None]:
             return run_notify(payload), None
         if kind == "probe":
             return gather_facts(), None
+        if kind == "permissions":
+            return check_permissions(), None
+        if kind.startswith("browser."):
+            return run_browser(kind, payload, timeout), None
+        if kind.startswith("mail."):
+            if kind == "mail.send" and not mail_send_allowed():
+                return None, ("Mailversand ist auf diesem Geraet nicht freigegeben "
+                              "(CONNECTOR_ALLOW_MAIL_SEND=1 im LaunchDaemon setzen)")
+            return run_mail(kind, payload, timeout), None
         return None, f"Kommandoart '{kind}' wird von diesem Agenten nicht unterstuetzt"
+    except AppleScriptError as exc:
+        return None, str(exc)
+    except KeyError as exc:
+        return None, f"Pflichtfeld fehlt: {exc}"
     except subprocess.TimeoutExpired:
         return None, f"Timeout nach {timeout}s"
     except FileNotFoundError as exc:
@@ -306,7 +733,7 @@ def execute(command: dict) -> tuple[dict | None, str | None]:
 def cmd_register(args: argparse.Namespace) -> int:
     hub = args.hub.rstrip("/")
     resp = http("POST", f"{hub}/v1/agent/register", body={
-        "code": args.code, "capabilities": CAPABILITIES, "facts": gather_facts(),
+        "code": args.code, "capabilities": capabilities(), "facts": gather_facts(),
     }, timeout=30)
     save_state({"hub": hub, "token": resp["device_token"], "device_id": resp["device"]["id"]})
     print(f"Registriert als '{resp['device']['id']}' (Modus: {resp['device']['mode']}).")
@@ -329,7 +756,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         caff = subprocess.Popen(["caffeinate", "-s", "-i"])
         log(f"caffeinate aktiv (PID {caff.pid})")
 
-    log(f"Agent laeuft. Geraet={device_id} Hub={hub}")
+    kinds_param = ",".join(handled_kinds())
+    log(f"Agent laeuft. Geraet={device_id} Rolle={role()} Hub={hub}")
+    log(f"Kommandoarten: {kinds_param}")
     backoff = 1.0
     last_heartbeat = 0.0
     while True:
@@ -339,7 +768,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                      {"facts": gather_facts()}, timeout=30)
                 last_heartbeat = time.time()
 
-            resp = http("GET", f"{hub}/v1/agent/poll?wait=25", token, timeout=45)
+            resp = http("GET", f"{hub}/v1/agent/poll?wait=25&kinds={kinds_param}",
+                        token, timeout=45)
             backoff = 1.0
             if resp.get("killswitch"):
                 log("Kill-Switch aktiv - warte 30s")

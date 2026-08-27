@@ -40,34 +40,51 @@ def token_matches(token: str, stored_hash: str) -> bool:
 
 MODES = ("notify", "readonly", "full")
 
-#: Welche Kommandoarten sind in welchem Modus erlaubt?
-MODE_KINDS: dict[str, frozenset[str]] = {
-    "notify": frozenset({"notify"}),
-    "readonly": frozenset({"notify", "shortcut", "fs.list", "fs.read", "probe"}),
-    "full": frozenset(
-        {
-            "notify",
-            "shortcut",
-            "fs.list",
-            "fs.read",
-            "fs.write",
-            "shell",
-            "claude",
-            "probe",
-        }
-    ),
-}
-
 #: Welche Kommandoarten setzen welche Geraetefaehigkeit voraus?
+#:
+#: 'mail.send' ist bewusst eine eigene Faehigkeit und nicht Teil von 'mail':
+#: Mails lesen und Mails verschicken sind zwei verschiedene Vertrauensfragen.
+#: Der Agent meldet sie nur, wenn sie beim Installieren ausdruecklich
+#: freigeschaltet wurde.
 KIND_CAPABILITY: dict[str, str] = {
     "notify": "notify",
     "shortcut": "shortcut",
+    "probe": "probe",
+    "permissions": "probe",
     "fs.list": "fs",
     "fs.read": "fs",
     "fs.write": "fs",
     "shell": "shell",
     "claude": "claude",
-    "probe": "probe",
+    # Browser (macOS, ueber AppleScript)
+    "browser.tabs": "browser",
+    "browser.read": "browser",
+    "browser.open": "browser",
+    "browser.js": "browser",
+    "browser.close": "browser",
+    # Mail.app (macOS, ueber AppleScript)
+    "mail.accounts": "mail",
+    "mail.mailboxes": "mail",
+    "mail.list": "mail",
+    "mail.search": "mail",
+    "mail.read": "mail",
+    "mail.draft": "mail",
+    "mail.send": "mail.send",
+}
+
+#: Nur beobachtend - aendert auf dem Geraet nichts.
+_READONLY_KINDS = frozenset({
+    "notify", "shortcut", "probe", "permissions",
+    "fs.list", "fs.read",
+    "browser.tabs", "browser.read",
+    "mail.accounts", "mail.mailboxes", "mail.list", "mail.search", "mail.read",
+})
+
+#: Welche Kommandoarten sind in welchem Modus erlaubt?
+MODE_KINDS: dict[str, frozenset[str]] = {
+    "notify": frozenset({"notify"}),
+    "readonly": _READONLY_KINDS,
+    "full": frozenset(KIND_CAPABILITY),
 }
 
 ALL_KINDS = frozenset(KIND_CAPABILITY)
@@ -158,4 +175,59 @@ def check_command(
             return PolicyResult(False, "'path' fehlt")
         if "\x00" in path:
             return PolicyResult(False, "ungueltiger Pfad")
+    if kind.startswith("browser."):
+        return _check_browser(kind, payload)
+    if kind.startswith("mail."):
+        return _check_mail(kind, payload)
+    return PolicyResult(True)
+
+
+#: Browser, die der Agent ansprechen kann. Alles andere wird abgelehnt, damit
+#: kein beliebiger Anwendungsname in ein AppleScript wandert.
+BROWSERS = ("Safari", "Google Chrome", "Brave Browser", "Microsoft Edge", "Arc")
+
+_ALLOWED_SCHEMES = ("http://", "https://", "file://", "about:blank")
+
+
+def _check_browser(kind: str, payload: dict) -> PolicyResult:
+    app = str(payload.get("app", "Safari"))
+    if app not in BROWSERS:
+        return PolicyResult(False, f"unbekannter Browser '{app}' (erlaubt: {', '.join(BROWSERS)})")
+    if kind == "browser.open":
+        url = str(payload.get("url", "")).strip()
+        if not url:
+            return PolicyResult(False, "'url' fehlt")
+        if not url.lower().startswith(_ALLOWED_SCHEMES):
+            return PolicyResult(False, "nur http(s)-, file:- und about:blank-URLs")
+        if any(c in url for c in "\"\\\n\r"):
+            return PolicyResult(False, "URL enthaelt unzulaessige Zeichen")
+    if kind == "browser.js":
+        script = str(payload.get("script", ""))
+        if not script.strip():
+            return PolicyResult(False, "'script' fehlt")
+        if len(script) > 20000:
+            return PolicyResult(False, "Skript laenger als 20000 Zeichen")
+    return PolicyResult(True)
+
+
+def _check_mail(kind: str, payload: dict) -> PolicyResult:
+    if kind in ("mail.send", "mail.draft"):
+        recipients = payload.get("to") or []
+        if isinstance(recipients, str):
+            recipients = [recipients]
+        if not recipients:
+            return PolicyResult(False, "'to' fehlt")
+        if len(recipients) > 20:
+            return PolicyResult(False, "hoechstens 20 Empfaenger")
+        for address in recipients:
+            if "@" not in str(address) or any(c in str(address) for c in "\"\\\n\r"):
+                return PolicyResult(False, f"ungueltige Adresse '{address}'")
+        if len(str(payload.get("body", ""))) > 100000:
+            return PolicyResult(False, "Text laenger als 100000 Zeichen")
+    if kind == "mail.read":
+        if not str(payload.get("id", "")).strip():
+            return PolicyResult(False, "'id' fehlt")
+    if kind == "mail.search":
+        if not str(payload.get("query", "")).strip():
+            return PolicyResult(False, "'query' fehlt")
     return PolicyResult(True)

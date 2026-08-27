@@ -31,6 +31,14 @@
              Zustand erreichbar bleibt. Vom Installer gesetzt. -->
         <key>CONNECTOR_KEEP_AWAKE</key>
         <string>1</string>
+        <!-- all = dieser Prozess bearbeitet Shell/Dateien UND Browser/Mail.
+             Bei installiertem Sitzungs-Agenten auf 'system' stellen. -->
+        <key>CONNECTOR_ROLE</key>
+        <string>all</string>
+        <!-- 0 = Claude darf Mails lesen und Entwuerfe anlegen, aber nicht
+             selbst verschicken. Bewusste Extra-Freigabe. -->
+        <key>CONNECTOR_ALLOW_MAIL_SEND</key>
+        <string>0</string>
     </dict>
 
     <key>RunAtLoad</key>

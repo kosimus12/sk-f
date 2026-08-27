@@ -19,8 +19,12 @@ mcp_sdk = pytest.importorskip("mcp", reason="MCP-SDK nicht installiert")
 SERVER_PY = pathlib.Path(__file__).resolve().parent.parent / "mcp-server" / "server.py"
 
 ERWARTETE_WERKZEUGE = {
-    "devices", "device_info", "probe", "run", "read_file", "write_file",
-    "list_dir", "notify", "shortcut", "command_status", "audit_log", "killswitch",
+    "devices", "device_info", "probe", "permissions",
+    "run", "read_file", "write_file", "list_dir",
+    "browser_tabs", "browser_read", "browser_open", "browser_js",
+    "mail_accounts", "mail_list", "mail_search", "mail_read",
+    "mail_draft", "mail_send",
+    "notify", "shortcut", "command_status", "audit_log", "killswitch",
 }
 
 

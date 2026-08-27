@@ -13,6 +13,7 @@ HUB=""
 CODE=""
 KEEP_AWAKE=0
 AGGRESSIVE=0
+ALLOW_MAIL_SEND=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --code) CODE="$2"; shift 2 ;;
     --keep-awake) KEEP_AWAKE=1; shift ;;
     --keep-awake-aggressive) KEEP_AWAKE=1; AGGRESSIVE=1; shift ;;
+    --allow-mail-send) ALLOW_MAIL_SEND=1; shift ;;
     *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
   esac
 done
@@ -63,6 +65,10 @@ if [[ $KEEP_AWAKE -eq 0 ]]; then
   # CONNECTOR_KEEP_AWAKE auf 0 setzen, wenn der Nutzer das nicht will.
   /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:CONNECTOR_KEEP_AWAKE 0" "$PLIST"
 fi
+if [[ $ALLOW_MAIL_SEND -eq 1 ]]; then
+  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:CONNECTOR_ALLOW_MAIL_SEND 1" "$PLIST"
+  echo "    Mailversand freigegeben (Ruecknahme: PlistBuddy ... 0, dann Neustart des Dienstes)"
+fi
 launchctl bootstrap system "$PLIST"
 launchctl enable "system/${LABEL}"
 
@@ -86,7 +92,10 @@ echo "==> Fertig. Status pruefen:"
 echo "    sudo launchctl print system/${LABEL} | head -20"
 echo "    tail -f /var/log/skconnector/agent.log"
 echo
-echo "    Hinweis: Fuer 'shell'-Kommandos, die auf Dateien in Dokumente/"
-echo "    Schreibtisch/Downloads zugreifen, muss /bin/bash einmalig unter"
-echo "    Systemeinstellungen > Datenschutz & Sicherheit > Festplattenvollzugriff"
-echo "    freigegeben werden."
+echo "==> WICHTIG - jetzt noch die macOS-Freigaben erteilen."
+echo "    Ohne sie bleiben Browser, Mail und geschuetzte Ordner gesperrt."
+echo "    In der GRAFISCHEN SITZUNG des Benutzers (nicht mit sudo) ausfuehren:"
+echo
+echo "        bash $SRC_DIR/macos/grant-permissions.sh"
+echo
+echo "    Danach vom Hub aus pruefen:  skconnect.py permissions <geraet>"

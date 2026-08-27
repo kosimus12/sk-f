@@ -146,6 +146,63 @@ def test_command_claimed_only_once(tmp_path):
     assert store.claim_next("d1") == []
 
 
+def test_claim_next_respects_the_kind_filter(tmp_path):
+    store = Store(str(tmp_path / "t.db"))
+    store.create_device("d1", "D1", "macos")
+    shell = store.enqueue("d1", "shell", {"command": "ls"})
+    mail = store.enqueue("d1", "mail.list", {})
+
+    # Der Sitzungsprozess fragt nur nach GUI-Kommandos ...
+    claimed = store.claim_next("d1", limit=5, kinds=["mail.list", "browser.tabs"])
+    assert [c["id"] for c in claimed] == [mail["id"]]
+    # ... und laesst das Shell-Kommando fuer den Daemon liegen.
+    assert store.get_command(shell["id"])["status"] == "queued"
+
+    claimed = store.claim_next("d1", limit=5, kinds=["shell", "fs.read"])
+    assert [c["id"] for c in claimed] == [shell["id"]]
+
+
+def test_two_processes_do_not_steal_each_others_commands(client):
+    """Daemon und Sitzungs-Agent teilen sich ein Token - aber keine Auftraege."""
+    created = make_device(client, "mac-simon",
+                          caps=("shell", "fs", "notify", "probe", "browser", "mail"))
+    token = enroll(client, created["enrollment_code"],
+                   caps=("shell", "fs", "notify", "probe", "browser", "mail"))
+    dev = {"Authorization": f"Bearer {token}"}
+
+    shell = client.post("/v1/devices/mac-simon/commands",
+                        json={"kind": "shell", "payload": {"command": "ls"}},
+                        headers=ctl()).json()
+    tabs = client.post("/v1/devices/mac-simon/commands",
+                       json={"kind": "browser.tabs", "payload": {}},
+                       headers=ctl()).json()
+
+    gui = client.get("/v1/agent/poll?wait=0&kinds=browser.tabs,mail.list", headers=dev).json()
+    assert [c["id"] for c in gui["commands"]] == [tabs["id"]]
+
+    system = client.get("/v1/agent/poll?wait=0&kinds=shell,fs.read", headers=dev).json()
+    assert [c["id"] for c in system["commands"]] == [shell["id"]]
+
+
+def test_poll_rejects_unknown_kinds(client):
+    created = make_device(client)
+    token = enroll(client, created["enrollment_code"])
+    resp = client.get("/v1/agent/poll?wait=0&kinds=shell,root.alles",
+                      headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 400
+
+
+def test_poll_without_kinds_still_takes_everything(client):
+    created = make_device(client)
+    token = enroll(client, created["enrollment_code"])
+    cmd = client.post("/v1/devices/mac-test/commands",
+                      json={"kind": "shell", "payload": {"command": "ls"}},
+                      headers=ctl()).json()
+    polled = client.get("/v1/agent/poll?wait=0",
+                        headers={"Authorization": f"Bearer {token}"}).json()
+    assert [c["id"] for c in polled["commands"]] == [cmd["id"]]
+
+
 def test_expire_stale_marks_timeout(tmp_path):
     store = Store(str(tmp_path / "t.db"))
     store.create_device("d1", "D1", "macos")

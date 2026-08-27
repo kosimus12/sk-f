@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  OPTIONALER Sitzungs-Agent (LaunchAgent).
+
+  Nur noetig, wenn Browser- und Mail-Steuerung ueber den System-Daemon nicht
+  funktioniert. Das passiert auf manchen Macs, weil macOS Apple Events aus
+  einem root-Daemon heraus auch nach erteilter Freigabe blockiert.
+
+  Aufteilung dann:
+    LaunchDaemon (root)   CONNECTOR_ROLE=system  -> Shell, Dateien
+    LaunchAgent  (Nutzer) CONNECTOR_ROLE=user    -> Browser, Mail, Mitteilungen
+
+  Beide teilen sich dasselbe Geraete-Token; der Hub verteilt die Kommandos
+  anhand der gemeldeten Kommandoarten, sie nehmen sich also nichts weg.
+
+  Einrichtung:
+    1. sudo /usr/libexec/PlistBuddy -c \
+         "Set :EnvironmentVariables:CONNECTOR_ROLE system" \
+         /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
+    2. sudo launchctl kickstart -k system/de.skfinanzberatung.connector
+    3. sudo cp /etc/skconnector/agent.json ~/.config/skconnector/agent.json
+       sudo chown $(whoami) ~/.config/skconnector/agent.json
+       chmod 600 ~/.config/skconnector/agent.json
+    4. cp de.skfinanzberatung.connector.user.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) \
+         ~/Library/LaunchAgents/de.skfinanzberatung.connector.user.plist
+
+  Der Sitzungs-Agent laeuft bei gesperrtem Bildschirm weiter. Er endet erst
+  beim Abmelden - die Shell- und Dateikommandos uebernimmt dann weiterhin
+  der Daemon.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>de.skfinanzberatung.connector.user</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/usr/local/libexec/skconnector/agent.py</string>
+        <string>run</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CONNECTOR_STATE</key>
+        <string>__HOME__/.config/skconnector/agent.json</string>
+        <key>CONNECTOR_ROLE</key>
+        <string>user</string>
+        <key>CONNECTOR_ALLOW_MAIL_SEND</key>
+        <string>0</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/skconnector-user.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/skconnector-user.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

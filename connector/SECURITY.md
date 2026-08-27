@@ -28,12 +28,40 @@ SSH-Schlüssel zu allen deinen Rechnern.
 | Modus | Erlaubt |
 |---|---|
 | `notify` | nur Mitteilungen |
-| `readonly` | Mitteilungen, Kurzbefehle, `fs.list`, `fs.read`, `probe` |
-| `full` | zusätzlich `fs.write` und `shell` |
+| `readonly` | beobachten: `fs.list`, `fs.read`, `probe`, `permissions`, `browser.tabs`, `browser.read`, `mail.list`, `mail.search`, `mail.read`, `mail.accounts`, Mitteilungen, Kurzbefehle |
+| `full` | zusätzlich verändern: `shell`, `fs.write`, `browser.open`, `browser.js`, `browser.close`, `mail.draft`, `mail.send` |
+
+Die Grenze zwischen `readonly` und `full` verläuft entlang der Frage, ob ein
+Kommando auf dem Gerät etwas verändert. Lesen ist `readonly`, jeder Eingriff
+ist `full`.
 
 Ein Gerät kann nur, was **beide** Seiten hergeben: der Modus *und* die
 Fähigkeiten, die der Agent beim Enrollment gemeldet hat. Ein iPhone bekommt
 `shell` also selbst im Modus `full` nicht, weil es die Fähigkeit nie meldet.
+
+### Mailversand ist eine eigene Freigabe
+
+`mail.send` hängt nicht an der Fähigkeit `mail`, sondern an einer zweiten
+Fähigkeit `mail.send`, die der Agent nur meldet, wenn beim Installieren
+`--allow-mail-send` gesetzt wurde. Mails lesen und Mails in deinem Namen
+verschicken sind zwei verschiedene Vertrauensfragen — Versand ist der einzige
+Vorgang hier, der nach außen wirkt und sich nicht zurücknehmen lässt.
+
+Der Standardweg ist `mail.draft`: Der Entwurf öffnet sich sichtbar in Mail.app,
+liegt in den Entwürfen, und ein Mensch drückt auf Senden.
+
+### Browser-JavaScript
+
+`browser.js` führt beliebiges JavaScript in einer angemeldeten Browsersitzung
+aus — also mit allen Cookies und Logins des Benutzers. Das ist mächtig
+(Formulare ausfüllen, Daten aus Webanwendungen holen) und entsprechend
+gefährlich: Wer diesen Aufruf steuert, ist in jedem eingeloggten Konto. Es
+steckt deshalb in `full` und läuft nur bei aktiver Benutzersitzung.
+
+Werte, die aus einem Kommando stammen (URLs, Betreffs, Empfänger), werden vor
+dem Einsetzen ins AppleScript escaped; Anführungszeichen und Zeilenumbrüche in
+Adressen und URLs weist der Hub zusätzlich ab. Tests dazu stehen in
+`tests/test_apps.py`.
 
 ### Deny-Liste
 

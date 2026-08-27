@@ -305,22 +305,33 @@ def agent_register(req: RegisterRequest, request: Request) -> dict:
 
 
 @app.get("/v1/agent/poll")
-async def agent_poll(wait: int = MAX_POLL_SECONDS, device: dict = Depends(require_device)) -> dict:
+async def agent_poll(wait: int = MAX_POLL_SECONDS, kinds: str = "",
+                     device: dict = Depends(require_device)) -> dict:
     """Long-Poll: haelt die Verbindung offen, bis ein Kommando vorliegt.
 
     Das Geraet haelt damit dauerhaft eine ausgehende Verbindung - genau das
     macht es auch im gesperrten Zustand und hinter NAT erreichbar.
+
+    `kinds` (Komma-Liste) grenzt auf die Kommandoarten ein, die der fragende
+    Prozess ausfuehren kann - noetig, wenn auf einem Mac System-Daemon und
+    Sitzungsprozess parallel pollen.
     """
     store.touch_device(device["id"])
     if killswitch_active():
         return {"commands": [], "killswitch": True, "poll_after_s": 30}
+
+    wanted = [k for k in kinds.split(",") if k.strip()] or None
+    if wanted:
+        unknown = set(wanted) - set(security.ALL_KINDS)
+        if unknown:
+            raise HTTPException(400, f"unbekannte Kommandoarten: {sorted(unknown)}")
 
     deadline = time.time() + max(0, min(wait, MAX_POLL_SECONDS))
     store.expire_stale()
     while True:
         # Kein expire_stale je Runde: der Janitor erledigt das im Hintergrund,
         # sonst oeffnet jedes Geraet im Sekundentakt eine DB-Verbindung.
-        commands = store.claim_next(device["id"], limit=5)
+        commands = store.claim_next(device["id"], limit=5, kinds=wanted)
         if commands:
             store.audit(f"device:{device['id']}", "command.claimed", device["id"],
                         command_ids=[c["id"] for c in commands])

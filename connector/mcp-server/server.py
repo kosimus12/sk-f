@@ -119,6 +119,25 @@ def probe(device: str) -> str:
     return json.dumps(_dispatch(device, "probe", {}, 30), indent=2, ensure_ascii=False)
 
 
+@server.tool()
+def permissions(device: str) -> str:
+    """Prueft auf einem Mac, welche macOS-Freigaben tatsaechlich funktionieren.
+
+    Zeigt fuer Mail.app, Safari, Chrome und Festplattenvollzugriff, ob der
+    Zugriff klappt - und welche Freigabe sonst fehlt. Bei der Einrichtung als
+    Erstes aufrufen, das erspart kryptische AppleScript-Fehlernummern.
+    """
+    out = _dispatch(device, "permissions", {}, 90)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    lines = []
+    for name, info in out["result"].items():
+        mark = {True: "OK  ", False: "FEHLT", None: "--  "}[info.get("ok")]
+        detail = info.get("hinweis") or info.get("wert")
+        lines.append(f"{mark} {name:<28} {detail if detail is not None else ''}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Ausfuehrung
 # ---------------------------------------------------------------------------
@@ -187,6 +206,174 @@ def list_dir(device: str, path: str, limit: int = 200) -> str:
         else:
             rows.append(f"{'d' if e['dir'] else '-'}  {e['size']:>10}  {e['name']}")
     return "\n".join(rows) or "(leer)"
+
+
+# ---------------------------------------------------------------------------
+# Browser (macOS, ueber AppleScript)
+# ---------------------------------------------------------------------------
+
+@server.tool()
+def browser_tabs(device: str, app: str = "Safari") -> str:
+    """Listet alle offenen Tabs eines Browsers mit Fenster- und Tab-Nummer.
+
+    Die Nummern brauchst du fuer browser_read und browser_js.
+    app: Safari, Google Chrome, Brave Browser, Microsoft Edge oder Arc.
+    """
+    out = _dispatch(device, "browser.tabs", {"app": app}, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    rows = [f"Fenster {t['window']}, Tab {t['tab']}: {t['title']}\n    {t['url']}"
+            for t in out["result"]["tabs"]]
+    return "\n".join(rows) or f"{app}: keine offenen Tabs."
+
+
+@server.tool()
+def browser_read(device: str, app: str = "Safari", window: int = 1, tab: int = 0) -> str:
+    """Liest den sichtbaren Text einer Browserseite.
+
+    tab=0 nimmt den gerade aktiven Tab. Setzt voraus, dass im Browser
+    'JavaScript aus Apple Events erlauben' aktiviert ist.
+    """
+    out = _dispatch(device, "browser.read",
+                    {"app": app, "window": window, "tab": tab}, 90)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    res = out["result"]
+    return res["result"] + ("\n[gekuerzt]" if res.get("truncated") else "")
+
+
+@server.tool()
+def browser_open(device: str, url: str, app: str = "Safari") -> str:
+    """Oeffnet eine URL in einem neuen Tab (nur Modus 'full')."""
+    out = _dispatch(device, "browser.open", {"app": app, "url": url}, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return f"{url} in {app} geoeffnet."
+
+
+@server.tool()
+def browser_js(device: str, script: str, app: str = "Safari",
+               window: int = 1, tab: int = 0) -> str:
+    """Fuehrt JavaScript in einem Tab aus und gibt das Ergebnis zurueck.
+
+    Damit lassen sich Formulare fuellen, Elemente anklicken oder gezielt
+    Daten aus einer Seite holen. Nur Modus 'full'.
+    """
+    out = _dispatch(device, "browser.js",
+                    {"app": app, "script": script, "window": window, "tab": tab}, 90)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    res = out["result"]
+    return res["result"] + ("\n[gekuerzt]" if res.get("truncated") else "")
+
+
+# ---------------------------------------------------------------------------
+# Mail.app (macOS, ueber AppleScript)
+# ---------------------------------------------------------------------------
+
+@server.tool()
+def mail_accounts(device: str) -> str:
+    """Listet die in Mail.app eingerichteten Konten."""
+    out = _dispatch(device, "mail.accounts", {}, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return "\n".join(
+        f"{a['name']:<25} {a['user']:<35} aktiv={a['enabled']}"
+        for a in out["result"]["accounts"]
+    ) or "Keine Konten gefunden."
+
+
+@server.tool()
+def mail_list(device: str, mailbox: str = "inbox", account: str = "",
+              limit: int = 25, unread_only: bool = False) -> str:
+    """Listet die neuesten Mails eines Postfachs (Betreff, Absender, Datum, ID).
+
+    Die ID brauchst du fuer mail_read.
+    """
+    out = _dispatch(device, "mail.list", {
+        "mailbox": mailbox, "account": account,
+        "limit": limit, "unread_only": unread_only}, 180)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return _format_messages(out["result"]["messages"])
+
+
+@server.tool()
+def mail_search(device: str, query: str, mailbox: str = "inbox", account: str = "",
+                limit: int = 25, scan: int = 150) -> str:
+    """Sucht in Betreff und Absender der letzten Mails eines Postfachs.
+
+    Durchsucht die letzten `scan` Nachrichten - kein Volltextindex, sondern
+    ein Durchlauf. Fuer aeltere Treffer scan erhoehen.
+    """
+    out = _dispatch(device, "mail.search", {
+        "query": query, "mailbox": mailbox, "account": account,
+        "limit": limit, "scan": scan}, 240)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    res = out["result"]
+    header = f"{len(res['messages'])} Treffer unter den letzten {res['scanned']} Mails:\n"
+    return header + _format_messages(res["messages"])
+
+
+@server.tool()
+def mail_read(device: str, id: str, mailbox: str = "inbox", account: str = "") -> str:
+    """Liest eine einzelne Mail im Volltext. id stammt aus mail_list."""
+    out = _dispatch(device, "mail.read",
+                    {"id": id, "mailbox": mailbox, "account": account}, 120)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    r = out["result"]
+    body = r["body"] + ("\n[gekuerzt]" if r.get("truncated") else "")
+    return f"Von:     {r['sender']}\nBetreff: {r['subject']}\nDatum:   {r['received']}\n\n{body}"
+
+
+@server.tool()
+def mail_draft(device: str, to: list[str], subject: str, body: str,
+               cc: list[str] | None = None, from_address: str = "") -> str:
+    """Legt einen Mailentwurf an, ohne ihn zu verschicken.
+
+    Der Entwurf oeffnet sich sichtbar in Mail.app und liegt in den Entwuerfen.
+    Der sichere Weg: erst Entwurf, dann selbst pruefen und senden.
+    """
+    payload: dict[str, Any] = {"to": to, "subject": subject, "body": body}
+    if cc:
+        payload["cc"] = cc
+    if from_address:
+        payload["from"] = from_address
+    out = _dispatch(device, "mail.draft", payload, 90)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return f"Entwurf an {', '.join(to)} angelegt: {subject}"
+
+
+@server.tool()
+def mail_send(device: str, to: list[str], subject: str, body: str,
+              cc: list[str] | None = None, from_address: str = "") -> str:
+    """Verschickt eine Mail sofort ueber Mail.app.
+
+    Braucht Modus 'full' UND die eigene Freigabe 'mail.send' auf dem Geraet -
+    Mails lesen und Mails verschicken sind bewusst getrennt. Wenn Unsicherheit
+    besteht, ob die Mail so rausgehen soll: mail_draft nehmen.
+    """
+    payload: dict[str, Any] = {"to": to, "subject": subject, "body": body}
+    if cc:
+        payload["cc"] = cc
+    if from_address:
+        payload["from"] = from_address
+    out = _dispatch(device, "mail.send", payload, 120)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return f"Mail an {', '.join(to)} verschickt: {subject}"
+
+
+def _format_messages(messages: list[dict]) -> str:
+    rows = []
+    for m in messages:
+        flag = " " if str(m.get("read", "")).lower() == "true" else "•"
+        rows.append(f"{flag} [{m['id']:>8}] {m['received'][:22]:<22} {m['sender'][:38]:<38} "
+                    f"{m['subject']}")
+    return "\n".join(rows) or "Keine Mails gefunden."
 
 
 # ---------------------------------------------------------------------------

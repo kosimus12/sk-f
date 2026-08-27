@@ -17,10 +17,18 @@ funktioniert hinter NAT, CGNAT und im Mobilfunknetz.
 |---|---|---|---|
 | Shell-Befehle | ✅ | ✅ | ❌ (gibt iOS nicht her) |
 | Dateien lesen/schreiben | ✅ | ✅ | ❌ |
+| **Browser steuern** (Tabs, Seitentext, JavaScript) | — | ✅ | ❌ |
+| **Mails** (lesen, suchen, Entwurf, senden) | — | ✅ | ❌ |
 | Systemstatus abfragen | ✅ | ✅ | ✅ (verzögert) |
 | Mitteilung zustellen | ✅ | ✅ (wenn angemeldet) | ✅ (sofort) |
 | Kurzbefehl starten | — | — | ✅ (verzögert) |
 | **Erreichbar bei gesperrtem Bildschirm** | ✅ immer | ✅ **ja** (LaunchDaemon) | teilweise — siehe unten |
+
+Browser und Mail laufen über AppleScript und brauchen deshalb eine **aktive
+Benutzersitzung**. Gesperrter Bildschirm ist in Ordnung, abgemeldet nicht —
+dann bleiben Shell und Dateien erreichbar, Browser und Mail nicht.
+
+**Einrichtung Schritt für Schritt: [`RUNBOOK.md`](RUNBOOK.md).**
 
 ### Zum gesperrten Zustand
 
@@ -48,6 +56,9 @@ connector/
 ├── ios/          Anleitung für iPhone und iPad (Kurzbefehle + Push)
 ├── tools/        skconnect.py — Kommandozeile für die Steuerseite
 └── tests/        Unit-Tests und ein End-to-End-Rauchtest
+
+RUNBOOK.md        Einrichtung Schritt für Schritt (beide Macs)
+SECURITY.md       Sicherheitsmodell, Grenzen, Empfehlungen
 ```
 
 ## Einrichtung
@@ -97,9 +108,10 @@ sudo bash agent/linux/install.sh --hub https://hub.DEINE-DOMAIN.de --code skc_en
 ### 4. Macs anbinden
 
 ```bash
-# auf dem Server:
+# auf dem Server — dein Mac, voller Zugriff:
 python3 tools/skconnect.py add mac-simon "Simons Mac" macos \
-        --mode full --caps shell,fs,notify,probe
+        --owner simon --mode full \
+        --caps shell,fs,notify,probe,browser,mail
 
 # auf dem Mac (Repo dorthin kopieren oder klonen):
 sudo bash agent/macos/install.sh \
@@ -114,16 +126,50 @@ sudo launchctl print system/de.skfinanzberatung.connector | head -20
 tail -f /var/log/skconnector/agent.log
 ```
 
-Einmalig nötig, wenn Claude auf Dokumente/Schreibtisch/Downloads zugreifen soll:
-`/bin/bash` unter *Systemeinstellungen → Datenschutz & Sicherheit →
-Festplattenvollzugriff* freigeben.
+Danach am Mac einmalig die macOS-Freigaben erteilen — **ohne sudo, in der
+grafischen Sitzung**, sonst erscheinen die Dialoge nicht:
 
-### 5. iPhones und iPad anbinden
+```bash
+bash agent/macos/grant-permissions.sh
+```
+
+Das Skript löst die Zustimmungsdialoge für Mail, Safari und Chrome aus und sagt
+am Ende, was noch fehlt. Zwei Dinge musst du zusätzlich von Hand setzen:
+*JavaScript aus Apple Events* im Browser und *Festplattenvollzugriff* für
+`/bin/bash` und `/usr/bin/python3`. Beides steht im [`RUNBOOK.md`](RUNBOOK.md).
+
+Gegenprobe vom Server aus:
+
+```bash
+python3 tools/skconnect.py permissions mac-simon
+```
+
+### 5. Über die Macs an iPhone-Daten kommen
+
+Ein eigener iPhone-Agent ist dafür nicht nötig — was in iCloud liegt, liegt auch
+auf dem Mac:
+
+| Auf dem iPhone | Auf dem Mac erreichbar? | Pfad |
+|---|---|---|
+| Dateien-App (iCloud Drive) | ✅ | `~/Library/Mobile Documents/com~apple~CloudDocs` |
+| Fotos (iCloud-Mediathek) | ✅ mit „Originale laden" | `~/Bilder/Fotos-Mediathek.photoslibrary` |
+| Notizen | ✅ über Notes.app / SQLite | `~/Library/Group Containers/group.com.apple.notes` |
+| Nachrichten (iMessage) | ✅ bei aktiviertem Sync | `~/Library/Messages/chat.db` |
+| Kontakte, Kalender | ✅ | `~/Library/Application Support/AddressBook`, `~/Library/Calendars` |
+| App-Daten außerhalb iCloud Drive | ❌ | bleiben im App-Sandbox auf dem Gerät |
+| WhatsApp-Chats | ❌ | eigenes Backup, nicht in iCloud Drive lesbar |
+
+Alle diese Pfade liegen hinter dem **Festplattenvollzugriff** — ohne den
+kommen `fs.read` und `shell` dort nicht heran.
+
+### 6. iPhones und iPad direkt anbinden (später)
 
 Siehe [`ios/README.md`](ios/README.md) — dort steht die vollständige Anleitung
-inklusive ntfy-Setup und dem Bauplan für den Kurzbefehl-Agenten.
+inklusive ntfy-Setup und dem Bauplan für den Kurzbefehl-Agenten. Für Push-
+Mitteilungen aufs iPhone brauchst du das; für Dateizugriff reicht der Weg über
+iCloud und den Mac.
 
-### 6. Claude den Konnektor geben
+### 7. Claude den Konnektor geben
 
 In `~/.claude/mcp.json` (oder `.mcp.json` im Projekt):
 
@@ -144,9 +190,16 @@ In `~/.claude/mcp.json` (oder `.mcp.json` im Projekt):
 
 Vorher einmalig `pip install -r mcp-server/requirements.txt`.
 
-Danach hat Claude diese Werkzeuge: `devices`, `device_info`, `probe`, `run`,
-`read_file`, `write_file`, `list_dir`, `notify`, `shortcut`, `command_status`,
-`audit_log`, `killswitch`.
+Danach hat Claude diese 23 Werkzeuge:
+
+| Bereich | Werkzeuge |
+|---|---|
+| Geräte | `devices`, `device_info`, `probe`, `permissions` |
+| Shell & Dateien | `run`, `read_file`, `write_file`, `list_dir` |
+| Browser | `browser_tabs`, `browser_read`, `browser_open`, `browser_js` |
+| Mail | `mail_accounts`, `mail_list`, `mail_search`, `mail_read`, `mail_draft`, `mail_send` |
+| Mobil | `notify`, `shortcut`, `command_status` |
+| Verwaltung | `audit_log`, `killswitch` |
 
 ## Mac dauerhaft erreichbar halten
 
@@ -193,14 +246,22 @@ nur heikel, sondern nach §202a StGB strafbar. Der Konnektor ist deshalb so
 gebaut, dass er ohne ihre aktive Mitwirkung auf ihren Geräten gar nicht erst
 anläuft.
 
-```bash
-skconnect.py add iphone-freundin "iPhone (Freundin)" ios \
-        --owner freundin --mode notify --caps notify \
-        --push-url https://ntfy.DEINE-DOMAIN.de/gf-iphone-c3d045
+Für Katyas Mac heißt das konkret: `readonly` mit Lese-Fähigkeiten. Ich kann
+Dateien, Mails und offene Tabs **lesen**, aber nichts ausführen, nichts
+schreiben und nichts verschicken.
 
-skconnect.py add mac-freundin "Mac (Freundin)" macos \
-        --owner freundin --mode notify --caps notify,probe
+```bash
+skconnect.py add mac-katya "Katyas Mac" macos \
+        --owner katya --mode readonly \
+        --caps fs,notify,probe,browser,mail
+
+skconnect.py add iphone-katya "iPhone (Katya)" ios \
+        --owner katya --mode notify --caps notify \
+        --push-url https://ntfy.DEINE-DOMAIN.de/katya-iphone-c3d045
 ```
+
+Höherstufen später mit `skconnect.py mode mac-katya full` — aber nur nach
+ausdrücklicher Zustimmung, nicht weil es gerade praktisch wäre.
 
 ## Sicherheit im Überblick
 
@@ -224,7 +285,7 @@ Ausführlich in [`SECURITY.md`](SECURITY.md). Die Kurzfassung:
 
 ```bash
 cd connector
-python3 -m pytest tests -q        # 37 Tests: Policy, Store, API
+python3 -m pytest tests -q        # 77 Tests: Policy, Store, API, AppleScript
 bash tests/smoke_e2e.sh           # echter Durchstich: Hub + Agent + CLI
 ```
 
