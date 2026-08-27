@@ -18,7 +18,10 @@
     1. sudo /usr/libexec/PlistBuddy -c \
          "Set :EnvironmentVariables:CONNECTOR_ROLE system" \
          /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
-    2. sudo launchctl kickstart -k system/de.skfinanzberatung.connector
+    2. sudo launchctl bootout system/de.skfinanzberatung.connector
+       sudo launchctl bootstrap system \
+         /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
+       (kickstart reicht nicht - es liest die plist nicht neu ein)
     3. sudo cp /etc/skconnector/agent.json ~/.config/skconnector/agent.json
        sudo chown $(whoami) ~/.config/skconnector/agent.json
        chmod 600 ~/.config/skconnector/agent.json

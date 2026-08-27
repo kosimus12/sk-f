@@ -189,7 +189,10 @@ Wenn du echten Versand willst, auf deinem Mac (nicht auf Katyas):
 sudo /usr/libexec/PlistBuddy -c \
   "Set :EnvironmentVariables:CONNECTOR_ALLOW_MAIL_SEND 1" \
   /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
-sudo launchctl kickstart -k system/de.skfinanzberatung.connector
+sudo launchctl bootout system/de.skfinanzberatung.connector
+sudo launchctl bootstrap system /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
+# kickstart reicht hier NICHT - es startet den Prozess neu,
+# liest die geaenderte plist aber nicht ein.
 
 # auf dem Hetzner, Fähigkeit ergänzen:
 python3 tools/skconnect.py add mac-simon "Simons Mac" macos \
@@ -203,24 +206,26 @@ Rücknahme: dasselbe mit `0`, Dienst neu starten.
 
 ## Teil 5 — Claude anschließen
 
-In `~/.claude/mcp.json` auf dem Rechner, an dem du mit Claude Code arbeitest:
+Claude Code liest `~/.claude/mcp.json` **nicht** — der Benutzer-Scope liegt in
+`~/.claude.json`. Statt die Datei von Hand zu bearbeiten, den CLI-Befehl nehmen,
+der schreibt an die richtige Stelle:
 
-```json
-{
-  "mcpServers": {
-    "skconnector": {
-      "command": "python3",
-      "args": ["/pfad/zu/sk-f/connector/mcp-server/server.py"],
-      "env": {
-        "CONNECTOR_HUB_URL": "https://hub.DEINE-DOMAIN.de",
-        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_..."
-      }
-    }
-  }
-}
+```bash
+claude mcp add skconnector --scope user \
+  --env CONNECTOR_HUB_URL=https://hub.DEINE-DOMAIN.de \
+  --env CONNECTOR_CONTROL_TOKEN=skc_ctl_... \
+  -- python3 /pfad/zu/sk-f/connector/mcp-server/server.py
+
+claude mcp list        # skconnector muss "Connected" zeigen
 ```
 
-Vorher `pip install -r mcp-server/requirements.txt`.
+Der MCP-Server braucht Python **3.10 oder neuer**. `python3 --version` prüfen —
+oft ist im PATH schon eine neuere Version als das `/usr/bin/python3` (3.9),
+mit dem der Agent-Daemon läuft. Fehlt eine: `brew install python@3.12` und den
+Pfad zu dessen Interpreter im Befehl oben verwenden.
+
+Liegt zusätzlich eine `.mcp.json` im Projekt, meldet Claude Code den Server
+doppelt (project + user scope). Einen der beiden deaktivieren.
 
 Erster Test in Claude Code: *„Zeig mir die verbundenen Geräte"* → ich rufe
 `devices` auf und sehe beide Macs.

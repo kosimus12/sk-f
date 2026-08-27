@@ -46,6 +46,11 @@ sudo install -m 0755 connector/agent/agent.py /usr/local/libexec/skconnector/age
 sudo launchctl kickstart -k system/de.skfinanzberatung.connector
 ```
 
+`kickstart` genügt hier, weil sich nur `agent.py` ändert. Sobald du die **plist**
+anfasst (z. B. für `CONNECTOR_ALLOW_MAIL_SEND`), reicht es nicht — dann
+`bootout` und `bootstrap`, sonst läuft der Dienst mit der alten Konfiguration
+weiter.
+
 Gegenprobe vom Hetzner: `python3 tools/skconnect.py probe mac-simon` —
 `screen_locked` muss jetzt `true` oder `false` sein, nicht `null`.
 
@@ -79,48 +84,37 @@ python3 tools/skconnect.py run mac-simon 'echo test > ~/Documents/ct.txt && cat 
 ```
 
 Und über die MCP-Werkzeuge (nach Schritt 5) bzw. per API: `app.list`,
-`browser.tabs`, `mail.accounts`. Bleibt `ls ~/Documents` leer, obwohl da etwas
-liegt, fehlt der Festplattenvollzugriff.
+`browser.tabs`, `mail.accounts`.
+
+**Wenn `ls ~/Documents` leer bleibt, obwohl da etwas liegt:** Nicht sofort auf
+den Festplattenvollzugriff schließen — das ist die naheliegende und meist
+falsche Diagnose. Der Daemon lief bis Version 1.2 als root ohne `HOME`, `~`
+zeigte auf `/var/root`. Gegenprobe mit absolutem Pfad:
+`ls /Users/skuper/Documents`. Kommt der durch, war es das `HOME`-Problem und
+Schritt 2 behebt es. Bleibt auch der leer, fehlt tatsächlich die Freigabe.
 
 ### 5. MCP-Server lokal einrichten
 
-**Achtung Python-Version:** Der Agent läuft auf `/usr/bin/python3` (3.9.6), der
-MCP-Server braucht aber **3.10 oder neuer**. Prüf das zuerst:
+`python3 --version` prüfen: Der MCP-Server braucht **3.10+**. Oft ist im PATH
+schon eine neuere Version als das `/usr/bin/python3` (3.9), mit dem der
+Agent-Daemon läuft — dann reicht sie. Nur wenn keine da ist:
+`brew install python@3.12` und ein venv anlegen.
+
+Eintragen **nicht** von Hand in `~/.claude/mcp.json` — Claude Code liest die
+Datei nicht, der Benutzer-Scope liegt in `~/.claude.json`. Nimm den CLI-Befehl:
 
 ```bash
-/usr/bin/python3 --version
-python3 --version
-brew --version 2>/dev/null
+claude mcp add skconnector --scope user \
+  --env CONNECTOR_HUB_URL=https://hub.138.199.230.178.sslip.io \
+  --env CONNECTOR_CONTROL_TOKEN=skc_ctl_… \
+  -- python3 /Users/skuper/src/sk-f/connector/mcp-server/server.py
+
+claude mcp list
 ```
 
-Ist kein Python ≥3.10 da, installier eines (`brew install python@3.12`) und
-richte damit ein venv ein:
-
-```bash
-/opt/homebrew/bin/python3.12 -m venv ~/.skconnector-venv
-~/.skconnector-venv/bin/pip install -r ~/src/sk-f/connector/mcp-server/requirements.txt
-```
-
-Dann in `~/.claude/mcp.json` eintragen — **vorhandene Einträge behalten**, den
-Interpreter aus dem venv nehmen:
-
-```json
-{
-  "mcpServers": {
-    "skconnector": {
-      "command": "/Users/skuper/.skconnector-venv/bin/python",
-      "args": ["/Users/skuper/src/sk-f/connector/mcp-server/server.py"],
-      "env": {
-        "CONNECTOR_HUB_URL": "https://hub.138.199.230.178.sslip.io",
-        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_…"
-      }
-    }
-  }
-}
-```
-
-Claude Code neu starten, dann `/mcp` — `skconnector` muss verbunden sein.
-Erster Test: „Zeig mir die verbundenen Geräte."
+Liegt im Projekt zusätzlich die Repo-`.mcp.json`, meldet Claude Code den Server
+doppelt. Dann den Projekt-Eintrag lokal deaktivieren, die Repo-Datei aber
+unangetastet lassen.
 
 ### 6. Enrollment-Code für Katyas Mac
 
@@ -164,7 +158,8 @@ sudo sed -i "s|^CONNECTOR_CONTROL_TOKEN=.*|CONNECTOR_CONTROL_TOKEN=skc_ctl_$(pyt
 sudo systemctl restart skconnector-hub
 ```
 
-Danach das neue Token in `~/.claude/mcp.json` und in den Umgebungsvariablen
+Danach das neue Token im MCP-Eintrag (`claude mcp remove skconnector`,
+dann neu hinzufügen) und in den Umgebungsvariablen
 nachziehen und mit `devices` gegenprüfen. Die Geräte-Token der Agenten sind
 davon nicht betroffen — die Macs bleiben verbunden.
 

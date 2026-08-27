@@ -8,6 +8,7 @@ pruefen genau das - sie brauchen keinen Mac.
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import sys
 
@@ -172,6 +173,57 @@ def test_closed_lid_needs_disablesleep_not_just_sleep_zero(agent):
 
 def test_pmset_without_ac_block_is_reported_as_unreadable(agent):
     assert agent.parse_pmset("irgendwas ohne Bloecke") == {}
+
+
+# Auf Apple Silicon fehlt 'disablesleep' in 'pmset -g custom' komplett - der
+# wirksame Wert steht nur in 'pmset -g' unter "Currently in use".
+PMSET_G_APPLE_SILICON = """System-wide power settings:
+Currently in use:
+ standbydelayhigh     86400
+ SleepDisabled        1
+ hibernatemode        3
+ powernap             1
+"""
+
+
+def test_sleep_disabled_is_read_from_pmset_g(agent):
+    assert agent.parse_sleep_disabled(PMSET_G_APPLE_SILICON) == 1
+    assert agent.parse_sleep_disabled(
+        PMSET_G_APPLE_SILICON.replace("SleepDisabled        1",
+                                      "SleepDisabled        0")) == 0
+
+
+def test_sleep_disabled_absent_returns_none(agent):
+    """Fehlt der Schluessel, faellt sleep_settings auf 'pmset -g custom' zurueck."""
+    assert agent.parse_sleep_disabled("Currently in use:\n hibernatemode 3\n") is None
+    assert agent.parse_sleep_disabled("") is None
+
+
+def test_sleep_disabled_ignores_unparsable_value(agent):
+    assert agent.parse_sleep_disabled(" SleepDisabled   ja\n") is None
+
+
+# ---------------------------------------------------------------------------
+# Home-Verzeichnis im root-Daemon
+# ---------------------------------------------------------------------------
+
+def test_tilde_resolves_to_the_logged_in_user_not_root(agent, monkeypatch):
+    """Sonst zeigt '~' auf /var/root und 'ls ~/Documents' liefert leer."""
+    monkeypatch.setattr(agent, "user_home", lambda: "/Users/skuper")
+    assert agent.expand_user_path("~") == "/Users/skuper"
+    assert agent.expand_user_path("~/Documents") == "/Users/skuper/Documents"
+    assert agent.expand_user_path("~/a/b.txt") == "/Users/skuper/a/b.txt"
+
+
+def test_absolute_paths_are_left_alone(agent, monkeypatch):
+    monkeypatch.setattr(agent, "user_home", lambda: "/Users/skuper")
+    assert agent.expand_user_path("/etc/hosts") == "/etc/hosts"
+    assert agent.expand_user_path("/tmp/~seltsam") == "/tmp/~seltsam"
+
+
+def test_user_home_falls_back_when_nobody_is_logged_in(agent, monkeypatch):
+    monkeypatch.setattr(agent, "console_user", lambda: (None, None))
+    assert agent.user_home() == os.path.expanduser("~")
 
 
 # ---------------------------------------------------------------------------

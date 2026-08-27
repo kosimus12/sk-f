@@ -202,24 +202,26 @@ iCloud und den Mac.
 
 ### 7. Claude den Konnektor geben
 
-In `~/.claude/mcp.json` (oder `.mcp.json` im Projekt):
+Claude Code liest `~/.claude/mcp.json` **nicht** — der Benutzer-Scope liegt in
+`~/.claude.json`. Nimm den CLI-Befehl, der schreibt an die richtige Stelle:
 
-```json
-{
-  "mcpServers": {
-    "skconnector": {
-      "command": "python3",
-      "args": ["/pfad/zu/connector/mcp-server/server.py"],
-      "env": {
-        "CONNECTOR_HUB_URL": "https://hub.DEINE-DOMAIN.de",
-        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_..."
-      }
-    }
-  }
-}
+```bash
+claude mcp add skconnector --scope user \
+  --env CONNECTOR_HUB_URL=https://hub.DEINE-DOMAIN.de \
+  --env CONNECTOR_CONTROL_TOKEN=skc_ctl_... \
+  -- python3 /pfad/zu/connector/mcp-server/server.py
+
+claude mcp list        # skconnector muss "Connected" zeigen
 ```
 
-Vorher einmalig `pip install -r mcp-server/requirements.txt`.
+Der MCP-Server braucht Python **3.10+** (`pip install -r
+mcp-server/requirements.txt`). Der Agent-Daemon dagegen läuft auf Apples
+`/usr/bin/python3` (3.9) — die beiden sind unabhängig voneinander.
+
+Im Repo liegt zusätzlich eine `.mcp.json`, die Hub-URL und Token aus
+Umgebungsvariablen liest — für Claude Code im Browser, damit kein Token in Git
+landet. Sind beide aktiv, meldet Claude Code den Server doppelt; dann einen
+davon deaktivieren.
 
 Danach hat Claude diese 27 Werkzeuge:
 

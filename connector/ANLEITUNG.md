@@ -313,28 +313,26 @@ nachsehen oder erledigen soll.
 
 ## Teil 5 — Claude den Konnektor geben
 
-In `~/.claude/mcp.json` auf dem Rechner, an dem du mit Claude Code arbeitest:
-
-```json
-{
-  "mcpServers": {
-    "skconnector": {
-      "command": "python3",
-      "args": ["/pfad/zu/sk-f/connector/mcp-server/server.py"],
-      "env": {
-        "CONNECTOR_HUB_URL": "https://hub.DEINE-DOMAIN.de",
-        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_..."
-      }
-    }
-  }
-}
-```
-
-Vorher einmalig:
+Claude Code liest `~/.claude/mcp.json` **nicht** — der Benutzer-Scope liegt in
+`~/.claude.json`. Statt die Datei von Hand zu bearbeiten, den CLI-Befehl nehmen,
+der schreibt an die richtige Stelle:
 
 ```bash
-pip install -r mcp-server/requirements.txt
+claude mcp add skconnector --scope user \
+  --env CONNECTOR_HUB_URL=https://hub.DEINE-DOMAIN.de \
+  --env CONNECTOR_CONTROL_TOKEN=skc_ctl_... \
+  -- python3 /pfad/zu/sk-f/connector/mcp-server/server.py
+
+claude mcp list        # skconnector muss "Connected" zeigen
 ```
+
+Der MCP-Server braucht Python **3.10 oder neuer**. `python3 --version` prüfen —
+oft ist im PATH schon eine neuere Version als das `/usr/bin/python3` (3.9),
+mit dem der Agent-Daemon läuft. Fehlt eine: `brew install python@3.12` und den
+Pfad zu dessen Interpreter im Befehl oben verwenden.
+
+Liegt zusätzlich eine `.mcp.json` im Projekt, meldet Claude Code den Server
+doppelt (project + user scope). Einen der beiden deaktivieren.
 
 ---
 
@@ -353,8 +351,16 @@ python3 tools/skconnect.py run mac-simon 'rm ~/Documents/connector-test.txt'
 ```
 
 Kommt `whoami` durch und lässt sich die Datei schreiben und wieder lesen, steht
-Ziel 1. Wenn `ls ~/Documents` leer bleibt, obwohl da etwas liegt: der
-Festplattenvollzugriff aus Schritt 2.4b fehlt.
+Ziel 1.
+
+**Wenn `ls ~/Documents` leer bleibt, obwohl da etwas liegt**, hat das zwei
+mögliche Ursachen — und die naheliegende ist meistens die falsche:
+
+1. Der Daemon läuft als root ohne `HOME`, `~` zeigt auf `/var/root`. Ab Version
+   1.2 löst der Agent `~` auf den angemeldeten Benutzer auf; bei älteren
+   Ständen hilft ein absoluter Pfad (`ls /Users/skuper/Documents`) als Gegenprobe.
+2. Erst wenn auch der absolute Pfad leer bleibt, fehlt der
+   Festplattenvollzugriff aus Schritt 2.4b.
 
 **Ziel 2 — Browser bei gesperrtem Mac**
 

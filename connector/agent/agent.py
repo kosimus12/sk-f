@@ -163,6 +163,33 @@ def console_user() -> tuple[str | None, int | None]:
         return None, None
 
 
+def user_home() -> str:
+    """Home-Verzeichnis des angemeldeten Benutzers - nicht das von root.
+
+    Der LaunchDaemon laeuft als root und startet ohne HOME. '~' zeigt dann
+    auf /var/root, und ein 'ls ~/Documents' liefert stillschweigend eine leere
+    Liste. Das sieht aus wie ein fehlender Festplattenvollzugriff, ist aber
+    keiner - deshalb wird '~' hier bewusst auf den Menschen aufgeloest, der am
+    Geraet angemeldet ist.
+    """
+    name, _uid = console_user()
+    if name:
+        try:
+            return pwd.getpwnam(name).pw_dir
+        except KeyError:
+            pass
+    return os.path.expanduser("~")
+
+
+def expand_user_path(path: str) -> str:
+    """Wie os.path.expanduser, aber '~' meint den angemeldeten Benutzer."""
+    if path == "~":
+        return user_home()
+    if path.startswith("~/"):
+        return os.path.join(user_home(), path[2:])
+    return os.path.expanduser(path)
+
+
 def parse_ioreg_lock(text: str) -> bool | None:
     """Liest den Sperrstatus aus der Plist-Ausgabe von 'ioreg -n Root -d1 -a'.
 
@@ -229,10 +256,32 @@ def parse_pmset(text: str) -> dict[str, int]:
     return werte
 
 
+def parse_sleep_disabled(text: str) -> int | None:
+    """Liest 'SleepDisabled' aus der Ausgabe von 'pmset -g'.
+
+    Auf Apple Silicon fehlt 'disablesleep' in 'pmset -g custom' - der
+    tatsaechlich wirksame Wert steht nur unter 'Currently in use:' als
+    'SleepDisabled'. Ohne diesen Weg meldet probe auf einem korrekt
+    eingestellten Mac faelschlich, er schlafe zugeklappt ein.
+    """
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].lower() == "sleepdisabled":
+            try:
+                return int(parts[1])
+            except ValueError:
+                return None
+    return None
+
+
 def sleep_settings() -> dict:
     """Beantwortet: bleibt dieser Mac zugeklappt und gesperrt erreichbar?"""
-    raw = _run_ok(["pmset", "-g", "custom"]) or ""
-    werte = parse_pmset(raw)
+    werte = parse_pmset(_run_ok(["pmset", "-g", "custom"]) or "")
+    live = parse_sleep_disabled(_run_ok(["pmset", "-g"]) or "")
+
+    # 'pmset -g' zeigt, was gerade wirkt - das schlaegt den Wert aus 'custom'.
+    if live is not None:
+        werte["disablesleep"] = live
     if not werte:
         return {"lesbar": False}
 
@@ -242,6 +291,7 @@ def sleep_settings() -> dict:
     return {
         "lesbar": True,
         "werte": werte,
+        "quelle_disablesleep": "pmset -g" if live is not None else "pmset -g custom",
         "bleibt_wach_am_netzteil": werte.get("sleep") == 0 or zugeklappt_ok,
         "bleibt_wach_zugeklappt": zugeklappt_ok,
         "hinweis": None if zugeklappt_ok else (
@@ -326,12 +376,19 @@ def run_shell(payload: dict, timeout: int) -> dict:
     as_user = payload.get("as_user")
 
     argv = ["/bin/bash", "-lc", command]
+    env = os.environ.copy()
     if as_user and os.getuid() == 0:
         # Der Daemon laeuft als root; fuer Nutzerkontext gezielt herabstufen.
+        # 'sudo -i' setzt HOME selbst richtig - hier nichts vorgeben.
         argv = ["/usr/bin/sudo", "-u", str(as_user), "-i", "/bin/bash", "-lc", command]
+    elif os.getuid() == 0:
+        # Ohne HOME zeigt '~' auf /var/root. Wer 'ls ~/Documents' schickt,
+        # meint sein eigenes Home, nicht das von root.
+        env["HOME"] = user_home()
 
     started = time.time()
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                          cwd=cwd, env=env)
     stdout, cut_out = _truncate(proc.stdout)
     stderr, cut_err = _truncate(proc.stderr)
     return {
@@ -344,7 +401,7 @@ def run_shell(payload: dict, timeout: int) -> dict:
 
 
 def run_fs(kind: str, payload: dict) -> dict:
-    path = os.path.expanduser(payload["path"])
+    path = expand_user_path(payload["path"])
     if kind == "fs.list":
         entries = []
         with os.scandir(path) as it:
