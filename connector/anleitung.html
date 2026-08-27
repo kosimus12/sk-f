@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beide Macs anbinden</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+</head>
+<body>
+<style>
+  :root {
+    --ground:      #EFF2F4;
+    --surface:     #FFFFFF;
+    --surface-alt: #E6EAEE;
+    --ink:         #141A1F;
+    --ink-soft:    #3D4954;
+    --muted:       #5F6C78;
+    --line:        #D3DAE1;
+    --line-soft:   #E2E7EC;
+
+    /* Zwei semantische Farben, die etwas bedeuten:
+       remote = geht aus der Ferne, hands = du musst am Gerät sitzen. */
+    --remote:      #0D6E78;
+    --remote-bg:   #DCEEF0;
+    --hands:       #97570A;
+    --hands-bg:    #F6E9D6;
+
+    --ok:          #1F6B43;
+    --bad:         #A32C25;
+
+    --code-bg:     #1A2229;
+    --code-ink:    #DCE5EC;
+
+    --radius: 10px;
+    --maxw: 46rem;
+
+    --f-serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --f-sans:  "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --f-mono:  "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0F141A;
+      --surface:     #171F27;
+      --surface-alt: #1F2932;
+      --ink:         #E2E9F0;
+      --ink-soft:    #BAC6D2;
+      --muted:       #8695A3;
+      --line:        #2B3742;
+      --line-soft:   #232E38;
+
+      --remote:      #55C2CD;
+      --remote-bg:   #123239;
+      --hands:       #E0A857;
+      --hands-bg:    #372A16;
+
+      --ok:          #5FBE8B;
+      --bad:         #E8776D;
+
+      --code-bg:     #0A0F14;
+      --code-ink:    #D5DFE8;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0F141A;
+    --surface:     #171F27;
+    --surface-alt: #1F2932;
+    --ink:         #E2E9F0;
+    --ink-soft:    #BAC6D2;
+    --muted:       #8695A3;
+    --line:        #2B3742;
+    --line-soft:   #232E38;
+
+    --remote:      #55C2CD;
+    --remote-bg:   #123239;
+    --hands:       #E0A857;
+    --hands-bg:    #372A16;
+
+    --ok:          #5FBE8B;
+    --bad:         #E8776D;
+
+    --code-bg:     #0A0F14;
+    --code-ink:    #D5DFE8;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  /* ---------- Kopf ---------- */
+
+  header { display: flex; flex-direction: column; gap: 0.9rem; }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    font-family: var(--f-serif);
+    font-weight: 600;
+    font-size: clamp(1.9rem, 5.5vw, 2.6rem);
+    line-height: 1.12;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .lede {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 1.05rem;
+    max-width: 34rem;
+  }
+
+  .goals {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.4rem 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: goal;
+  }
+  .goals li {
+    display: flex;
+    gap: 0.7rem;
+    align-items: baseline;
+    font-size: 0.95rem;
+    color: var(--ink-soft);
+  }
+  .goals li::before {
+    counter-increment: goal;
+    content: counter(goal);
+    font-family: var(--f-mono);
+    font-size: 0.75rem;
+    color: var(--remote);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+    flex: none;
+  }
+
+  /* ---------- Fortschritt ---------- */
+
+  .progress {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+    padding: 0.7rem 0 0.6rem;
+    margin: -0.6rem 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    font-family: var(--f-mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .bar {
+    flex: 1;
+    height: 5px;
+    background: var(--surface-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--remote);
+    border-radius: 3px;
+    transition: width 0.35s ease;
+  }
+  .progress button {
+    font: inherit;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+  }
+  .progress button:hover { color: var(--ink); border-color: var(--muted); }
+  .progress button:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+
+  /* ---------- Abschnitte ---------- */
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  h2 {
+    font-family: var(--f-serif);
+    font-weight: 600;
+    font-size: 1.35rem;
+    letter-spacing: -0.01em;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--f-mono);
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--muted);
+    flex: none;
+  }
+
+  h3 {
+    font-family: var(--f-sans);
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin: 0;
+    letter-spacing: 0.005em;
+  }
+
+  p { margin: 0; }
+  p + p { margin-top: 0.7rem; }
+
+  a { color: var(--remote); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; border-radius: 2px; }
+
+  /* ---------- Zustandsmatrix ---------- */
+
+  .matrix-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 30rem; }
+  th, td { text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--line-soft); }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+    white-space: nowrap;
+  }
+  tbody tr:last-child th, tbody tr:last-child td { border-bottom: none; }
+  tbody th { font-weight: 400; color: var(--ink-soft); }
+  td { text-align: center; font-family: var(--f-mono); font-size: 0.95rem; }
+  td.y { color: var(--ok); }
+  td.n { color: var(--bad); }
+
+  /* ---------- Regel-Karten ---------- */
+
+  .rules { display: grid; gap: 0.85rem; grid-template-columns: 1fr; }
+  @media (min-width: 34rem) { .rules { grid-template-columns: 1fr 1fr; } }
+
+  .rule {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--hands);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .rule strong { font-size: 0.95rem; }
+  .rule span { font-size: 0.87rem; color: var(--muted); }
+
+  /* ---------- Schritte ---------- */
+
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .step.done { opacity: 0.55; }
+
+  .step-head { display: flex; align-items: flex-start; gap: 0.7rem; }
+
+  .step-head input[type="checkbox"] {
+    appearance: none;
+    flex: none;
+    width: 1.15rem; height: 1.15rem;
+    margin: 0.18rem 0 0;
+    border: 1.5px solid var(--muted);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    display: grid;
+    place-content: center;
+  }
+  .step-head input[type="checkbox"]::after {
+    content: "";
+    width: 0.62rem; height: 0.34rem;
+    border-left: 2px solid var(--surface);
+    border-bottom: 2px solid var(--surface);
+    transform: rotate(-45deg) translate(1px, -1px);
+    opacity: 0;
+  }
+  .step-head input[type="checkbox"]:checked {
+    background: var(--remote);
+    border-color: var(--remote);
+  }
+  .step-head input[type="checkbox"]:checked::after { opacity: 1; }
+  .step-head input[type="checkbox"]:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+
+  .step-title { display: flex; flex-direction: column; gap: 0.3rem; }
+
+  .where {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    align-self: flex-start;
+    font-family: var(--f-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+  }
+  .where.remote { background: var(--remote-bg); color: var(--remote); }
+  .where.hands  { background: var(--hands-bg);  color: var(--hands); }
+
+  .note { font-size: 0.88rem; color: var(--muted); }
+  .note strong { color: var(--ink-soft); }
+
+  /* ---------- Code ---------- */
+
+  .code {
+    position: relative;
+    background: var(--code-bg);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .code pre {
+    margin: 0;
+    padding: 0.8rem 3rem 0.8rem 0.9rem;
+    overflow-x: auto;
+    font-family: var(--f-mono);
+    font-size: 0.8rem;
+    line-height: 1.65;
+    color: var(--code-ink);
+  }
+  .code .copy {
+    position: absolute;
+    top: 0.45rem; right: 0.45rem;
+    font-family: var(--f-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8FA3B4;
+    background: rgba(255,255,255,0.07);
+    border: none;
+    border-radius: 4px;
+    padding: 0.22rem 0.45rem;
+    cursor: pointer;
+  }
+  .code .copy:hover { background: rgba(255,255,255,0.14); color: #DCE5EC; }
+  .code .copy:focus-visible { outline: 2px solid var(--remote); outline-offset: 1px; }
+
+  code.inline {
+    font-family: var(--f-mono);
+    font-size: 0.85em;
+    background: var(--surface-alt);
+    padding: 0.08em 0.32em;
+    border-radius: 4px;
+  }
+
+  /* ---------- Dialoge, die zu bestätigen sind ---------- */
+
+  .dialogs {
+    list-style: none;
+    margin: 0;
+    padding: 0.75rem 0.9rem;
+    background: var(--hands-bg);
+    border-radius: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+  }
+  .dialogs li { display: flex; gap: 0.5rem; }
+  .dialogs li::before { content: "→"; color: var(--hands); flex: none; }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.9rem; color: var(--ink-soft); }
+
+  /* ---------- Fehlertabelle ---------- */
+
+  .trouble th, .trouble td { text-align: left; font-family: var(--f-sans); font-size: 0.86rem; }
+  .trouble td:first-child { color: var(--ink); }
+  .trouble code { font-family: var(--f-mono); font-size: 0.82em; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1.4rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">SK Connector · Einrichtung</div>
+    <h1>Beide Macs anbinden</h1>
+    <p class="lede">Ein Abend, zwei Rechner, drei Ziele. Die Reihenfolge ist wichtig: ohne Hub geht auf den Macs nichts.</p>
+    <ol class="goals">
+      <li>Lesen und Schreiben auf beiden Macs, auch wenn der Mac gesperrt ist</li>
+      <li>Browser-Steuerung auf beiden</li>
+      <li>Zugriff auf alle Programme auf beiden</li>
+    </ol>
+  </header>
+
+  <div class="progress">
+    <span id="count">0 / 0</span>
+    <div class="bar"><span id="fill"></span></div>
+    <button type="button" id="reset">Zurücksetzen</button>
+  </div>
+
+  <section>
+    <h2>Was am Ende wann funktioniert</h2>
+    <p class="note">Das Wichtigste vorweg, damit du weißt, worauf du hinarbeitest.</p>
+    <div class="matrix-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Funktion</th>
+            <th>Gesperrt,<br>angemeldet</th>
+            <th>Abgemeldet</th>
+            <th>Mac<br>schläft</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th>Shell-Befehle</th><td class="y">✓</td><td class="y">✓</td><td class="n">✕</td></tr>
+          <tr><th>Dateien lesen <em>und schreiben</em></th><td class="y">✓</td><td class="y">✓</td><td class="n">✕</td></tr>
+          <tr><th>Programme steuern</th><td class="y">✓</td><td class="n">✕</td><td class="n">✕</td></tr>
+          <tr><th>Browser über den Konnektor</th><td class="y">✓</td><td class="n">✕</td><td class="n">✕</td></tr>
+          <tr><th>Mails</th><td class="y">✓</td><td class="n">✕</td><td class="n">✕</td></tr>
+          <tr><th>Claude in Chrome (Add-on)</th><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="rules">
+      <div class="rule">
+        <strong>Sperren, nicht abmelden</strong>
+        <span>Sperren ist völlig in Ordnung. Abmelden beendet die Benutzersitzung — damit sind Programme, Browser und Mail weg.</span>
+      </div>
+      <div class="rule">
+        <strong>Der Mac darf nicht schlafen</strong>
+        <span>Ein schlafender Mac ist offline, egal wie gut alles konfiguriert ist. Dafür sorgt <code class="inline">--keep-awake</code>.</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">00</span> Jetzt sofort, vor allem anderen</h2>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="dns">
+        <div class="step-title">
+          <span class="where hands">Bei deinem DNS-Anbieter</span>
+          <h3>A-Record auf die Hetzner-IP setzen</h3>
+        </div>
+      </div>
+      <p class="note">Eine Subdomain, z. B. <code class="inline">hub.sk-finanzberatung.de</code>. Die Propagation dauert manchmal eine halbe Stunde — deshalb zuerst.</p>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>dig +short hub.DEINE-DOMAIN.de</pre></div>
+      <p class="note">Muss deine Hetzner-IP zeigen, bevor du weitermachst.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">01</span> Hub auf dem Hetzner</h2>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="hub-install">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Installieren</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>git clone https://github.com/kosimus12/sk-f /opt/src/sk-f
+cd /opt/src/sk-f
+git checkout claude/hetzner-multi-device-connector-ply62n
+cd connector
+
+sudo bash hub/deploy/install.sh</pre></div>
+      <p class="note"><strong>Der Installer zeigt einmalig das Control-Token</strong> (<code class="inline">skc_ctl_…</code>). Sofort in den Passwortmanager — es ist der Generalschlüssel zu beiden Macs und taucht nie wieder auf.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="hub-tls">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>TLS über Caddy davorsetzen</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>sudo apt install -y caddy
+sudo cp hub/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo nano /etc/caddy/Caddyfile     # hub.example.de → deine Subdomain
+sudo systemctl reload caddy
+
+curl -s https://hub.DEINE-DOMAIN.de/healthz</pre></div>
+      <p class="note">Erwartet: <code class="inline">{"ok":true,…}</code></p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="hub-env">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Steuerseite konfigurieren</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>export CONNECTOR_HUB_URL=https://hub.DEINE-DOMAIN.de
+export CONNECTOR_CONTROL_TOKEN=skc_ctl_...</pre></div>
+      <p class="note">Gilt für alle weiteren Befehle mit <code class="inline">skconnect.py</code>.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span> Dein Mac</h2>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-add">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Gerät anlegen</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>python3 tools/skconnect.py add mac-simon "Simons Mac" macos \
+        --owner simon --mode full \
+        --caps shell,fs,notify,probe,app,browser,mail</pre></div>
+      <p class="note"><code class="inline">full</code> = lesen und schreiben. <code class="inline">app</code> ist die Fähigkeit für „alle Programme“. Der Befehl gibt einen Enrollment-Code aus, 30 Minuten gültig.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-agent">
+        <div class="step-title">
+          <span class="where hands">Am Mac · Terminal</span>
+          <h3>Agent installieren</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>git clone https://github.com/kosimus12/sk-f ~/src/sk-f
+cd ~/src/sk-f
+git checkout claude/hetzner-multi-device-connector-ply62n
+cd connector
+
+sudo bash agent/macos/install.sh \
+     --hub https://hub.DEINE-DOMAIN.de \
+     --code skc_enr_... \
+     --keep-awake</pre></div>
+      <p class="note">Beim MacBook, das mit geschlossenem Deckel am Strom hängt, stattdessen <code class="inline">--keep-awake-aggressive</code>.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-perm">
+        <div class="step-title">
+          <span class="where hands">Am Mac · ohne sudo</span>
+          <h3>Freigaben erteilen</h3>
+        </div>
+      </div>
+      <p class="note">Der Schritt, an dem die meisten Setups scheitern. Muss in der grafischen Sitzung laufen, nicht über SSH, und <strong>ohne sudo</strong>.</p>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>bash agent/macos/grant-permissions.sh</pre></div>
+      <ul class="dialogs">
+        <li>„Terminal“ möchte „Mail“ steuern. — <strong>Erlauben</strong></li>
+        <li>„Terminal“ möchte „Safari“ steuern. — <strong>Erlauben</strong></li>
+        <li>… ebenso Chrome, Finder, Notizen, Kalender, Kontakte, Erinnerungen, Nachrichten, Musik, System Events</li>
+      </ul>
+      <p class="note"><strong>Warum jetzt und nicht später:</strong> macOS fragt bei jedem Programm genau einmal. Kommt diese Frage später, während der Mac gesperrt ist und niemand davorsitzt, kann sie niemand wegklicken — das Kommando scheitert dann einfach. Weitere Programme: <code class="inline">--apps "Pages,Numbers,Notion"</code></p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-js">
+        <div class="step-title">
+          <span class="where hands">Am Mac · Menüleiste</span>
+          <h3>JavaScript aus Apple Events erlauben</h3>
+        </div>
+      </div>
+      <p class="note">Dafür gibt es keinen Dialog — ohne diese Einstellung kommt Seitentext leer zurück.</p>
+      <ul class="plain">
+        <li><strong>Safari:</strong> Einstellungen → Erweitert → „Funktionen für Webentwickler anzeigen“, dann Menü <em>Entwickler</em> → „JavaScript aus Apple Events erlauben“</li>
+        <li><strong>Chrome:</strong> Menü <em>Darstellung</em> → <em>Entwickler</em> → „JavaScript über Apple Events zulassen“</li>
+      </ul>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-fda">
+        <div class="step-title">
+          <span class="where hands">Am Mac · Systemeinstellungen</span>
+          <h3>Festplattenvollzugriff eintragen</h3>
+        </div>
+      </div>
+      <p class="note">Sonst sind Dokumente, Schreibtisch, Downloads und die Mail-Ablage für den Dienst leer.</p>
+      <ul class="plain">
+        <li>Systemeinstellungen → Datenschutz &amp; Sicherheit → <strong>Festplattenvollzugriff</strong></li>
+        <li>„+“ anklicken, dann <strong>Cmd+Shift+G</strong> und beide Pfade eintragen</li>
+      </ul>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>/bin/bash
+/usr/bin/python3</pre></div>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="simon-check">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Gegenprobe</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>python3 tools/skconnect.py devices
+python3 tools/skconnect.py permissions mac-simon</pre></div>
+      <p class="note"><strong>Erst weitermachen, wenn nichts mehr auf <code class="inline">FEHLT</code> steht.</strong></p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span> Katyas Mac</h2>
+    <p class="note">Identischer Ablauf mit <code class="inline">--mode full</code>, also lesen und schreiben wie auf deinem eigenen Mac.</p>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="katya-add">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Gerät anlegen</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>python3 tools/skconnect.py add mac-katya "Katyas Mac" macos \
+        --owner katya --mode full \
+        --caps shell,fs,notify,probe,app,browser,mail</pre></div>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="katya-agent">
+        <div class="step-title">
+          <span class="where hands">An Katyas Mac</span>
+          <h3>Agent installieren und freigeben</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>git clone https://github.com/kosimus12/sk-f ~/src/sk-f
+cd ~/src/sk-f && git checkout claude/hetzner-multi-device-connector-ply62n
+cd connector
+
+sudo bash agent/macos/install.sh \
+     --hub https://hub.DEINE-DOMAIN.de --code skc_enr_... --keep-awake
+
+bash agent/macos/grant-permissions.sh</pre></div>
+      <p class="note">Danach dieselben zwei Handgriffe wie oben: JavaScript aus Apple Events und Festplattenvollzugriff.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="katya-transparenz">
+        <div class="step-title">
+          <span class="where hands">Gemeinsam mit Katya</span>
+          <h3>Drei Befehle zeigen</h3>
+        </div>
+      </div>
+      <p class="note"><code class="inline">full</code> heißt Shell-Zugriff, Dateien schreiben, Programme steuern, Mails lesen — derselbe Zugriff wie auf deinem eigenen Mac. Diese drei Befehle gehören zur Einrichtung, nicht als Nachtrag hinterher.</p>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre># Was wurde auf meinem Mac gemacht?
+python3 tools/skconnect.py audit --device mac-katya --limit 100
+
+# Sofort abklemmen, von überall, wirkt in Sekunden:
+python3 tools/skconnect.py revoke mac-katya
+
+# Endgültig entfernen, direkt am Mac:
+sudo launchctl bootout system/de.skfinanzberatung.connector</pre></div>
+      <p class="note">Falls sie erst mal nur mitlesen lassen will: <code class="inline">skconnect.py mode mac-katya readonly</code> — jederzeit wieder auf <code class="inline">full</code> umstellbar.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span> Browser: die zwei Wege</h2>
+    <p class="note">Du willst beide — sie lösen verschiedene Probleme.</p>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="chrome-ext">
+        <div class="step-title">
+          <span class="where hands">Auf beiden Macs</span>
+          <h3>Weg A — Claude in Chrome, das Add-on</h3>
+        </div>
+      </div>
+      <p class="note">Anthropics eigene Erweiterung, seit dem 26. August 2026 auf allen bezahlten Plänen verfügbar.</p>
+      <ul class="plain">
+        <li><a href="https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn">Claude in Chrome</a> installieren (Version 1.0.36 oder neuer)</li>
+        <li>In der Erweiterung mit dem Claude-Konto anmelden</li>
+        <li>In Claude Code auf diesem Mac: <code class="inline">claude --chrome</code>, oder einmalig <code class="inline">/chrome</code> → „Enabled by default“</li>
+      </ul>
+      <p class="note">Claude kann dann Tabs öffnen, klicken, tippen, Konsole und DOM lesen — <strong>mit deinem eingeloggten Browserzustand</strong>, also auch in Gmail, Notion oder Google Docs. Voraussetzung: Anmeldung über <code class="inline">/login</code>, nicht per API-Key.</p>
+      <p class="note"><strong>Was es nicht ist:</strong> kein Fernzugriff. Es läuft, während auf diesem Mac eine Claude-Code-Sitzung offen ist — nicht, wenn der Mac gesperrt im Nebenzimmer steht.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="browser-connector">
+        <div class="step-title">
+          <span class="where remote">Schon fertig nach Teil 02/03</span>
+          <h3>Weg B — Browser über den Konnektor</h3>
+        </div>
+      </div>
+      <p class="note">Der Fernzugriff: funktioniert bei gesperrtem Bildschirm, aus einer zentralen Sitzung, für beide Macs gleichzeitig. Läuft über AppleScript und ist mit Teil 02 bereits eingerichtet.</p>
+      <ul class="plain">
+        <li><code class="inline">browser_tabs</code> — offene Tabs mit Fenster- und Tab-Nummer</li>
+        <li><code class="inline">browser_read</code> — sichtbarer Seitentext</li>
+        <li><code class="inline">browser_open</code> — URL in neuem Tab</li>
+        <li><code class="inline">browser_js</code> — JavaScript im Tab ausführen</li>
+      </ul>
+      <p class="note">Weniger komfortabel als Weg A — kein Klicken per Beschreibung, keine Screenshots. Dafür aus der Ferne und ohne offene Sitzung auf dem Zielrechner.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span> Claude den Konnektor geben</h2>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="mcp">
+        <div class="step-title">
+          <span class="where hands">Auf deinem Arbeitsrechner</span>
+          <h3>MCP-Server eintragen</h3>
+        </div>
+      </div>
+      <p class="note">In <code class="inline">~/.claude/mcp.json</code>, danach einmalig <code class="inline">pip install -r mcp-server/requirements.txt</code>.</p>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>{
+  "mcpServers": {
+    "skconnector": {
+      "command": "python3",
+      "args": ["/pfad/zu/sk-f/connector/mcp-server/server.py"],
+      "env": {
+        "CONNECTOR_HUB_URL": "https://hub.DEINE-DOMAIN.de",
+        "CONNECTOR_CONTROL_TOKEN": "skc_ctl_..."
+      }
+    }
+  }
+}</pre></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span> Abnahme</h2>
+    <p class="note">Sperr beide Macs mit <strong>Ctrl+Cmd+Q</strong> — sperren, nicht abmelden — und lass sie am Strom. Dann für <code class="inline">mac-simon</code> und <code class="inline">mac-katya</code>:</p>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="test-1">
+        <div class="step-title">
+          <span class="where remote">Hetzner · SSH</span>
+          <h3>Ziel 1 — Lesen und Schreiben bei gesperrtem Mac</h3>
+        </div>
+      </div>
+      <div class="code"><button class="copy" type="button">Kopieren</button><pre>python3 tools/skconnect.py run mac-simon 'whoami && ls ~/Documents | head -5'
+python3 tools/skconnect.py run mac-simon 'echo "Test $(date)" > ~/Documents/connector-test.txt'
+python3 tools/skconnect.py run mac-simon 'cat ~/Documents/connector-test.txt'
+python3 tools/skconnect.py run mac-simon 'rm ~/Documents/connector-test.txt'</pre></div>
+      <p class="note">Bleibt <code class="inline">ls ~/Documents</code> leer, obwohl da etwas liegt: Festplattenvollzugriff fehlt.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="test-2">
+        <div class="step-title">
+          <span class="where remote">In Claude Code</span>
+          <h3>Ziel 2 — Browser bei gesperrtem Mac</h3>
+        </div>
+      </div>
+      <ul class="plain">
+        <li>„Zeig mir die offenen Tabs in Safari auf mac-simon.“</li>
+        <li>„Lies den Text der aktiven Seite auf mac-simon vor.“</li>
+      </ul>
+      <p class="note">Kommt der Text leer zurück: „JavaScript aus Apple Events“ fehlt.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <input type="checkbox" data-k="test-3">
+        <div class="step-title">
+          <span class="where remote">In Claude Code</span>
+          <h3>Ziel 3 — Alle Programme bei gesperrtem Mac</h3>
+        </div>
+      </div>
+      <ul class="plain">
+        <li>„Welche Programme laufen gerade auf mac-simon?“</li>
+        <li>„Lies mir die Titel meiner letzten Notizen von mac-simon vor.“</li>
+      </ul>
+      <p class="note">Fehler <code class="inline">-1743</code> bedeutet immer: für dieses Programm fehlt die Automation-Freigabe.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Wenn etwas klemmt</h2>
+    <div class="matrix-wrap">
+      <table class="trouble">
+        <thead>
+          <tr><th>Symptom</th><th>Ursache</th><th>Behebung</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Gerät bleibt <code>offline</code></td>
+            <td>Daemon läuft nicht</td>
+            <td><code>tail -50 /var/log/skconnector/agent.log</code></td>
+          </tr>
+          <tr>
+            <td>Fehler <code>-1743</code></td>
+            <td>Automation-Freigabe fehlt</td>
+            <td><code>grant-permissions.sh --apps "Name"</code> am Mac, ohne sudo</td>
+          </tr>
+          <tr>
+            <td>„Niemand ist angemeldet“</td>
+            <td>Mac ist abgemeldet, nicht nur gesperrt</td>
+            <td>Anmelden und nur sperren</td>
+          </tr>
+          <tr>
+            <td>Browser-Text leer</td>
+            <td>JavaScript aus Apple Events aus</td>
+            <td>Schritt in Teil 02</td>
+          </tr>
+          <tr>
+            <td>Nachts nicht erreichbar</td>
+            <td>Mac schläft</td>
+            <td><code>pmset -g custom</code> prüfen, ggf. <code>--keep-awake-aggressive</code></td>
+          </tr>
+          <tr>
+            <td>Chrome-Add-on nicht erkannt</td>
+            <td>Native-Messaging-Host fehlt</td>
+            <td>Chrome und Claude Code neu starten, dann <code>/chrome</code> → Reconnect</td>
+          </tr>
+          <tr>
+            <td><strong>Alles sofort anhalten</strong></td>
+            <td>—</td>
+            <td><code>skconnect.py killswitch on</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p>Zwei Dinge bleiben bewusst aus, bis du sie ausdrücklich einschaltest: <strong>Mailversand</strong> (lesen und Entwürfe gehen, echter Versand braucht <code class="inline">--allow-mail-send</code>) und die <strong>direkte iPhone-Anbindung</strong> (für Dateien reicht der Weg über iCloud und den Mac).</p>
+    <p>Nach ein paar Tagen ins Protokoll schauen: <code class="inline">skconnect.py audit --limit 100</code>. Dort steht jedes Kommando mit Zeitstempel — auch jedes abgelehnte.</p>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var KEY = "skconnector-anleitung-v1";
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"][data-k]'));
+    var fill = document.getElementById("fill");
+    var count = document.getElementById("count");
+
+    function load() {
+      try {
+        var raw = localStorage.getItem(KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) { return {}; }
+    }
+
+    function save(state) {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* privat, egal */ }
+    }
+
+    function render() {
+      var done = 0;
+      boxes.forEach(function (b) {
+        if (b.checked) done++;
+        var step = b.closest(".step");
+        if (step) step.classList.toggle("done", b.checked);
+      });
+      var pct = boxes.length ? Math.round((done / boxes.length) * 100) : 0;
+      fill.style.width = pct + "%";
+      count.textContent = done + " / " + boxes.length;
+    }
+
+    var state = load();
+    boxes.forEach(function (b) {
+      if (state[b.dataset.k]) b.checked = true;
+      b.addEventListener("change", function () {
+        var s = load();
+        if (b.checked) s[b.dataset.k] = 1; else delete s[b.dataset.k];
+        save(s);
+        render();
+      });
+    });
+    render();
+
+    document.getElementById("reset").addEventListener("click", function () {
+      boxes.forEach(function (b) { b.checked = false; });
+      save({});
+      render();
+    });
+
+    document.querySelectorAll(".code .copy").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var pre = btn.parentNode.querySelector("pre");
+        if (!pre) return;
+        var text = pre.textContent;
+        var done = function () {
+          var old = btn.textContent;
+          btn.textContent = "Kopiert";
+          setTimeout(function () { btn.textContent = old; }, 1400);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () {});
+        } else {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand("copy"); done(); } catch (e) {}
+          document.body.removeChild(ta);
+        }
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>
