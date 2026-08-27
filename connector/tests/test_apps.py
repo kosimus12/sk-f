@@ -218,6 +218,42 @@ def test_mail_send_needs_its_own_capability():
         "mail.send", "full", ["mail", "mail.send"], {"to": ["a@b.de"]}).allowed
 
 
+def test_applescript_cannot_smuggle_shell_past_the_deny_list():
+    """'do shell script' im AppleScript laeuft durch dieselbe Pruefung."""
+    boese = 'do shell script "rm -rf / --no-preserve-root"'
+    verdict = security.check_command("app.applescript", "full", ["app"], {"script": boese})
+    assert not verdict.allowed and "do shell script" in verdict.reason
+
+    harmlos = 'tell application "Notes" to return name of every note'
+    assert security.check_command(
+        "app.applescript", "full", ["app"], {"script": harmlos}).allowed
+
+    erlaubt = 'do shell script "ls ~/Documents"'
+    assert security.check_command(
+        "app.applescript", "full", ["app"], {"script": erlaubt}).allowed
+
+
+def test_applescript_deny_list_sees_through_escaped_quotes():
+    boese = 'do shell script "diskutil eraseDisk JHFS+ \\"Weg\\" disk2"'
+    assert not security.check_command(
+        "app.applescript", "full", ["app"], {"script": boese}).allowed
+
+
+def test_app_list_is_readonly_but_launching_is_not():
+    assert security.check_command("app.list", "readonly", ["app"], {}).allowed
+    for kind, payload in (("app.launch", {"name": "Notes"}),
+                          ("app.quit", {"name": "Notes"}),
+                          ("app.applescript", {"script": "return 1"})):
+        assert not security.check_command(kind, "readonly", ["app"], payload).allowed, kind
+        assert security.check_command(kind, "full", ["app"], payload).allowed, kind
+
+
+@pytest.mark.parametrize("name", ['Notes" to quit\ntell application "Finder', 'a' * 101, ""])
+def test_app_name_cannot_break_out_of_the_script(name):
+    assert not security.check_command(
+        "app.launch", "full", ["app"], {"name": name}).allowed
+
+
 @pytest.mark.parametrize("url", [
     "javascript:alert(1)",
     "data:text/html,<script>alert(1)</script>",

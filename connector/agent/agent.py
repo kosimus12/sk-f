@@ -49,13 +49,14 @@ MAX_OUTPUT_BYTES = 256 * 1024  # 256 KiB pro Kommando, danach wird gekuerzt
 SYSTEM_KINDS = ["shell", "fs.list", "fs.read", "fs.write", "probe", "permissions"]
 USER_KINDS = [
     "notify",
+    "app.list", "app.launch", "app.quit", "app.applescript",
     "browser.tabs", "browser.read", "browser.open", "browser.js", "browser.close",
     "mail.accounts", "mail.mailboxes", "mail.list", "mail.search", "mail.read",
     "mail.draft", "mail.send",
 ]
 
 SYSTEM_CAPS = ["shell", "fs", "probe"]
-USER_CAPS = ["notify", "browser", "mail"]
+USER_CAPS = ["notify", "app", "browser", "mail"]
 
 
 def role() -> str:
@@ -72,7 +73,7 @@ def handled_kinds() -> list[str]:
         kinds += USER_KINDS
     if platform.system() != "Darwin":
         # Browser und Mail laufen ueber AppleScript - anderswo gibt es sie nicht.
-        kinds = [k for k in kinds if not k.startswith(("browser.", "mail."))]
+        kinds = [k for k in kinds if not k.startswith(("app.", "browser.", "mail."))]
     if not mail_send_allowed():
         kinds = [k for k in kinds if k != "mail.send"]
     return kinds
@@ -87,7 +88,7 @@ def capabilities() -> list[str]:
         caps += USER_CAPS
     if platform.system() != "Darwin":
         # Browser- und Mail-Steuerung gibt es nur ueber AppleScript.
-        caps = [c for c in caps if c not in ("browser", "mail")]
+        caps = [c for c in caps if c not in ("app", "browser", "mail")]
     if mail_send_allowed() and "mail" in caps:
         caps.append("mail.send")
     return caps
@@ -499,6 +500,55 @@ return 1
         return 1
 
 
+# -- Beliebige Programme ----------------------------------------------------
+
+def run_app(kind: str, payload: dict, timeout: int) -> dict:
+    """Programme starten, beenden, auflisten - oder beliebiges AppleScript.
+
+    'app.applescript' ist der Generalschluessel fuer alles, was sich auf dem
+    Mac skripten laesst: Notizen, Kalender, Musik, Finder, Office, Fremdapps.
+    macOS fragt bei jedem Programm einmal nach Zustimmung - siehe
+    grant-permissions.sh, das die Abfragen vorab ausloest.
+    """
+    if kind == "app.list":
+        raw = run_osascript(
+            f'set out to ""\n'
+            f'tell application "System Events"\n'
+            f'  repeat with p in (every process whose background only is false)\n'
+            f'    set out to out & (name of p) & {as_literal(SEP)} & '
+            f'(unix id of p) & {as_literal(SEP)} & (frontmost of p) & {as_literal(REC)}\n'
+            f'  end repeat\nend tell\nreturn out', timeout)
+        return {"apps": parse_records(raw, ["name", "pid", "frontmost"])}
+
+    if kind == "app.launch":
+        name = payload["name"]
+        # 'open -a' braucht keine Automation-Freigabe - der bessere Weg zum
+        # Starten, weil er auch bei noch nie freigegebenen Programmen geht.
+        argv = ["/usr/bin/open", "-a", name]
+        if payload.get("file"):
+            argv.append(os.path.expanduser(str(payload["file"])))
+        user, uid = console_user()
+        if os.getuid() == 0:
+            if uid is None:
+                raise AppleScriptError("Niemand angemeldet - Programm nicht startbar")
+            argv = ["/bin/launchctl", "asuser", str(uid)] + argv
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        if proc.returncode != 0:
+            raise AppleScriptError(proc.stderr.strip() or f"open endete mit {proc.returncode}")
+        return {"launched": name, "user": user}
+
+    if kind == "app.quit":
+        run_osascript(f'tell application {as_literal(payload["name"])} to quit', timeout)
+        return {"quit": payload["name"]}
+
+    if kind == "app.applescript":
+        raw = run_osascript(payload["script"], timeout)
+        text, truncated = _truncate(raw.strip())
+        return {"result": text, "truncated": truncated}
+
+    raise ValueError(f"unbekannte Programm-Operation: {kind}")
+
+
 # -- Mail.app ---------------------------------------------------------------
 
 def mail_script_list(mailbox: str, account: str, limit: int, unread_only: bool) -> str:
@@ -704,6 +754,8 @@ def execute(command: dict) -> tuple[dict | None, str | None]:
             return gather_facts(), None
         if kind == "permissions":
             return check_permissions(), None
+        if kind.startswith("app."):
+            return run_app(kind, payload, timeout), None
         if kind.startswith("browser."):
             return run_browser(kind, payload, timeout), None
         if kind.startswith("mail."):

@@ -10,7 +10,29 @@
 # Es macht nichts Heimliches: Es loest genau die Aktionen aus, fuer die macOS
 # eine Zustimmung verlangt, damit die Dialoge erscheinen und du sie bewusst
 # bestaetigen kannst. Danach meldet es, was funktioniert und was nicht.
+#
+#   bash grant-permissions.sh --apps "Notizen,Kalender,Musik,Finder"
+#
+# WICHTIG fuer den gesperrten Zustand: macOS fragt bei JEDEM Programm einmal
+# nach Zustimmung. Sitzt spaeter niemand am Mac, kann diesen Dialog niemand
+# wegklicken - das Kommando schlaegt dann fehl. Deshalb hier vorab alle
+# Programme durchgehen, die Claude spaeter steuern koennen soll.
 set -uo pipefail
+
+# Programme, die standardmaessig vorab freigegeben werden.
+STANDARD_APPS="Mail,Safari,Google Chrome,System Events,Finder,Notes,Calendar,Contacts,Reminders,Messages,Music,Terminal"
+EXTRA_APPS=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apps) EXTRA_APPS="$2"; shift 2 ;;
+    --only) STANDARD_APPS="$2"; EXTRA_APPS=""; shift 2 ;;
+    -h|--help)
+      echo "Aufruf: bash grant-permissions.sh [--apps \"App1,App2\"] [--only \"App1,App2\"]"
+      exit 0 ;;
+    *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
+  esac
+done
 
 if [[ $EUID -eq 0 ]]; then
   echo "Bitte OHNE sudo starten - sonst erscheinen die Dialoge nicht." >&2
@@ -51,16 +73,24 @@ vorher schon einmal abgelehnt worden. Dann von Hand nachtragen unter
 Systemeinstellungen > Datenschutz & Sicherheit > Automation.
 TEXT
 
-schritt "Mail.app"
-pruefe_app "Mail steuern" 'tell application "Mail" to return (count of accounts) as text'
+schritt "Programme freigeben"
+echo "    Jedes Programm einmal antippen, damit macOS jetzt fragt statt spaeter."
+echo
+ALLE="$STANDARD_APPS"
+[[ -n "$EXTRA_APPS" ]] && ALLE="$ALLE,$EXTRA_APPS"
 
-schritt "Browser"
-for app in "Safari" "Google Chrome"; do
-  if [[ -d "/Applications/$app.app" ]]; then
-    pruefe_app "$app steuern" "tell application \"$app\" to return (count of windows) as text"
-  else
-    hinweis "$app ist nicht installiert - uebersprungen"
-  fi
+IFS=',' read -r -a APP_LISTE <<< "$ALLE"
+for app in "${APP_LISTE[@]}"; do
+  app="$(echo "$app" | sed 's/^ *//; s/ *$//')"
+  [[ -z "$app" ]] && continue
+  case "$app" in
+    Mail)           frage='tell application "Mail" to return (count of accounts) as text' ;;
+    "System Events") frage='tell application "System Events" to return (count of processes) as text' ;;
+    Safari|"Google Chrome"|"Brave Browser"|"Microsoft Edge"|Arc)
+                    frage="tell application \"$app\" to return (count of windows) as text" ;;
+    *)              frage="tell application \"$app\" to return name as text" ;;
+  esac
+  pruefe_app "$app" "$frage"
 done
 
 schritt "JavaScript aus Apple Events"

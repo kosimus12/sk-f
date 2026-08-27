@@ -21,6 +21,7 @@ SERVER_PY = pathlib.Path(__file__).resolve().parent.parent / "mcp-server" / "ser
 ERWARTETE_WERKZEUGE = {
     "devices", "device_info", "probe", "permissions",
     "run", "read_file", "write_file", "list_dir",
+    "app_list", "app_launch", "app_quit", "applescript",
     "browser_tabs", "browser_read", "browser_open", "browser_js",
     "mail_accounts", "mail_list", "mail_search", "mail_read",
     "mail_draft", "mail_send",

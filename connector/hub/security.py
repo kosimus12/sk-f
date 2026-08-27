@@ -62,6 +62,11 @@ KIND_CAPABILITY: dict[str, str] = {
     "browser.open": "browser",
     "browser.js": "browser",
     "browser.close": "browser",
+    # Beliebige Programme (macOS, ueber AppleScript)
+    "app.list": "app",
+    "app.launch": "app",
+    "app.quit": "app",
+    "app.applescript": "app",
     # Mail.app (macOS, ueber AppleScript)
     "mail.accounts": "mail",
     "mail.mailboxes": "mail",
@@ -76,6 +81,7 @@ KIND_CAPABILITY: dict[str, str] = {
 _READONLY_KINDS = frozenset({
     "notify", "shortcut", "probe", "permissions",
     "fs.list", "fs.read",
+    "app.list",
     "browser.tabs", "browser.read",
     "mail.accounts", "mail.mailboxes", "mail.list", "mail.search", "mail.read",
 })
@@ -179,6 +185,32 @@ def check_command(
         return _check_browser(kind, payload)
     if kind.startswith("mail."):
         return _check_mail(kind, payload)
+    if kind.startswith("app."):
+        return _check_app(kind, payload)
+    return PolicyResult(True)
+
+
+def _check_app(kind: str, payload: dict) -> PolicyResult:
+    """Programmsteuerung: der Name wandert in ein AppleScript, der Text nicht."""
+    if kind in ("app.launch", "app.quit"):
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return PolicyResult(False, "'name' fehlt")
+        if len(name) > 100 or any(c in name for c in '"\\\n\r\x00'):
+            return PolicyResult(False, f"ungueltiger Programmname '{name}'")
+    if kind == "app.applescript":
+        script = str(payload.get("script", ""))
+        if not script.strip():
+            return PolicyResult(False, "'script' fehlt")
+        if len(script) > 20000:
+            return PolicyResult(False, "Skript laenger als 20000 Zeichen")
+        # Ein AppleScript kann per 'do shell script' die Shell-Deny-Liste
+        # umgehen. Deshalb laeuft der eingebettete Teil durch dieselbe Pruefung.
+        for shell_part in re.findall(r'do shell script\s+"((?:[^"\\]|\\.)*)"', script):
+            verdict = check_shell(shell_part.replace('\\"', '"'))
+            if not verdict.allowed:
+                return PolicyResult(
+                    False, f"'do shell script' im AppleScript: {verdict.reason}")
     return PolicyResult(True)
 
 

@@ -209,6 +209,70 @@ def list_dir(device: str, path: str, limit: int = 200) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Programme (macOS, ueber AppleScript)
+# ---------------------------------------------------------------------------
+
+@server.tool()
+def app_list(device: str) -> str:
+    """Listet die laufenden Programme mit sichtbarem Fenster."""
+    out = _dispatch(device, "app.list", {}, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return "\n".join(
+        f"{'*' if a['frontmost'] == 'true' else ' '} {a['name']:<30} PID {a['pid']}"
+        for a in out["result"]["apps"]
+    ) or "Keine Programme im Vordergrund."
+
+
+@server.tool()
+def app_launch(device: str, name: str, file: str = "") -> str:
+    """Startet ein Programm, optional mit einer Datei.
+
+    Braucht keine vorherige Automation-Freigabe - laeuft ueber 'open -a'.
+    """
+    payload: dict[str, Any] = {"name": name}
+    if file:
+        payload["file"] = file
+    out = _dispatch(device, "app.launch", payload, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return f"{name} gestartet."
+
+
+@server.tool()
+def app_quit(device: str, name: str) -> str:
+    """Beendet ein Programm."""
+    out = _dispatch(device, "app.quit", {"name": name}, 60)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    return f"{name} beendet."
+
+
+@server.tool()
+def applescript(device: str, script: str, timeout_s: int = 120) -> str:
+    """Fuehrt beliebiges AppleScript auf einem Mac aus - der Generalschluessel.
+
+    Damit laesst sich alles steuern, was auf dem Mac skriptfaehig ist:
+    Notizen, Kalender, Kontakte, Musik, Finder, Office, Fremdprogramme.
+
+    Zwei Dinge beachten:
+      * macOS fragt beim ERSTEN Zugriff auf ein Programm nach Zustimmung.
+        Sitzt niemand am Mac, schlaegt das Kommando fehl - die betroffenen
+        Programme vorher mit grant-permissions.sh freigeben.
+      * 'do shell script' im Skript laeuft durch dieselbe Deny-Liste wie
+        normale Shell-Kommandos.
+
+    Beispiel:
+        tell application "Notes" to return name of every note
+    """
+    out = _dispatch(device, "app.applescript", {"script": script}, timeout_s)
+    if out["status"] != "done":
+        return f"[{out['status']}] {out.get('error')}"
+    res = out["result"]
+    return (res["result"] or "(keine Ausgabe)") + ("\n[gekuerzt]" if res.get("truncated") else "")
+
+
+# ---------------------------------------------------------------------------
 # Browser (macOS, ueber AppleScript)
 # ---------------------------------------------------------------------------
 

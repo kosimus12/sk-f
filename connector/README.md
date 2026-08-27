@@ -17,6 +17,7 @@ funktioniert hinter NAT, CGNAT und im Mobilfunknetz.
 |---|---|---|---|
 | Shell-Befehle | ✅ | ✅ | ❌ (gibt iOS nicht her) |
 | Dateien lesen/schreiben | ✅ | ✅ | ❌ |
+| **Programme steuern** (beliebiges AppleScript) | — | ✅ | ❌ |
 | **Browser steuern** (Tabs, Seitentext, JavaScript) | — | ✅ | ❌ |
 | **Mails** (lesen, suchen, Entwurf, senden) | — | ✅ | ❌ |
 | Systemstatus abfragen | ✅ | ✅ | ✅ (verzögert) |
@@ -28,7 +29,8 @@ Browser und Mail laufen über AppleScript und brauchen deshalb eine **aktive
 Benutzersitzung**. Gesperrter Bildschirm ist in Ordnung, abgemeldet nicht —
 dann bleiben Shell und Dateien erreichbar, Browser und Mail nicht.
 
-**Einrichtung Schritt für Schritt: [`RUNBOOK.md`](RUNBOOK.md).**
+**Einrichtung Schritt für Schritt: [`ANLEITUNG.md`](ANLEITUNG.md)** — beide Macs,
+alle drei Ziele, mit Abnahme-Test am Ende.
 
 ### Zum gesperrten Zustand
 
@@ -57,7 +59,8 @@ connector/
 ├── tools/        skconnect.py — Kommandozeile für die Steuerseite
 └── tests/        Unit-Tests und ein End-to-End-Rauchtest
 
-RUNBOOK.md        Einrichtung Schritt für Schritt (beide Macs)
+ANLEITUNG.md      Einrichtung beider Macs: lesen+schreiben, Browser, Programme
+RUNBOOK.md        Kurzfassung der Einrichtung
 SECURITY.md       Sicherheitsmodell, Grenzen, Empfehlungen
 ```
 
@@ -111,7 +114,7 @@ sudo bash agent/linux/install.sh --hub https://hub.DEINE-DOMAIN.de --code skc_en
 # auf dem Server — dein Mac, voller Zugriff:
 python3 tools/skconnect.py add mac-simon "Simons Mac" macos \
         --owner simon --mode full \
-        --caps shell,fs,notify,probe,browser,mail
+        --caps shell,fs,notify,probe,app,browser,mail
 
 # auf dem Mac (Repo dorthin kopieren oder klonen):
 sudo bash agent/macos/install.sh \
@@ -190,12 +193,13 @@ In `~/.claude/mcp.json` (oder `.mcp.json` im Projekt):
 
 Vorher einmalig `pip install -r mcp-server/requirements.txt`.
 
-Danach hat Claude diese 23 Werkzeuge:
+Danach hat Claude diese 27 Werkzeuge:
 
 | Bereich | Werkzeuge |
 |---|---|
 | Geräte | `devices`, `device_info`, `probe`, `permissions` |
 | Shell & Dateien | `run`, `read_file`, `write_file`, `list_dir` |
+| Programme | `app_list`, `app_launch`, `app_quit`, `applescript` |
 | Browser | `browser_tabs`, `browser_read`, `browser_open`, `browser_js` |
 | Mail | `mail_accounts`, `mail_list`, `mail_search`, `mail_read`, `mail_draft`, `mail_send` |
 | Mobil | `notify`, `shortcut`, `command_status` |
@@ -230,14 +234,13 @@ gelöst als bei deinen eigenen:
 * **Sie muss selbst zustimmen.** Ein Gerät kommt nur ins System, wenn jemand auf
   *diesem* Gerät einen Enrollment-Code einlöst. Das lässt sich nicht aus der
   Ferne erledigen — und das ist Absicht, nicht Bequemlichkeitsverlust.
-* **Voreinstellung ist die niedrigste Stufe.** Lege ihre Geräte mit
-  `--owner freundin --mode notify` an. Dann kann Claude Mitteilungen schicken
-  und sonst nichts. Mehr Rechte nur, wenn sie das ausdrücklich will:
-  `skconnect.py mode mac-freundin readonly`.
+* **Die Stufe ist eine bewusste Entscheidung.** `--mode notify` (nur
+  Mitteilungen), `readonly` (lesen) oder `full` (Shell, schreiben, Programme).
+  Umstellen jederzeit mit `skconnect.py mode mac-katya <stufe>`.
 * **Sie kann jederzeit raus.** `skconnect.py revoke <gerät>` klemmt sofort ab;
   auf dem Mac beendet `sudo launchctl bootout system/de.skfinanzberatung.connector`
   den Agenten endgültig. Zeig ihr beide Befehle bei der Einrichtung.
-* **Alles ist protokolliert.** `skconnect.py audit --device mac-freundin` zeigt
+* **Alles ist protokolliert.** `skconnect.py audit --device mac-katya` zeigt
   jeden Zugriff mit Zeitstempel. Sie sollte wissen, dass es dieses Log gibt und
   wie sie es anschaut.
 
@@ -246,22 +249,21 @@ nur heikel, sondern nach §202a StGB strafbar. Der Konnektor ist deshalb so
 gebaut, dass er ohne ihre aktive Mitwirkung auf ihren Geräten gar nicht erst
 anläuft.
 
-Für Katyas Mac heißt das konkret: `readonly` mit Lese-Fähigkeiten. Ich kann
-Dateien, Mails und offene Tabs **lesen**, aber nichts ausführen, nichts
-schreiben und nichts verschicken.
-
 ```bash
+# voller Zugriff, wie auf dem eigenen Mac:
+skconnect.py add mac-katya "Katyas Mac" macos \
+        --owner katya --mode full \
+        --caps shell,fs,notify,probe,app,browser,mail
+
+# oder erst mal nur mitlesen:
 skconnect.py add mac-katya "Katyas Mac" macos \
         --owner katya --mode readonly \
-        --caps fs,notify,probe,browser,mail
+        --caps fs,notify,probe,app,browser,mail
 
 skconnect.py add iphone-katya "iPhone (Katya)" ios \
         --owner katya --mode notify --caps notify \
         --push-url https://ntfy.DEINE-DOMAIN.de/katya-iphone-c3d045
 ```
-
-Höherstufen später mit `skconnect.py mode mac-katya full` — aber nur nach
-ausdrücklicher Zustimmung, nicht weil es gerade praktisch wäre.
 
 ## Sicherheit im Überblick
 
@@ -285,7 +287,7 @@ Ausführlich in [`SECURITY.md`](SECURITY.md). Die Kurzfassung:
 
 ```bash
 cd connector
-python3 -m pytest tests -q        # 77 Tests: Policy, Store, API, AppleScript
+python3 -m pytest tests -q        # 83 Tests: Policy, Store, API, AppleScript
 bash tests/smoke_e2e.sh           # echter Durchstich: Hub + Agent + CLI
 ```
 
