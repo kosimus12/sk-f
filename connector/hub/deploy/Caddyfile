@@ -1,0 +1,24 @@
+# TLS-Terminierung vor dem Hub. Caddy holt und erneuert das Zertifikat selbst.
+# Ersetze den Hostnamen durch deine eigene Subdomain (A-Record auf den Hetzner-Server).
+hub.example.de {
+    encode zstd gzip
+
+    # Long-Poll: der Agent haelt die Verbindung bis zu 25s offen.
+    reverse_proxy 127.0.0.1:8787 {
+        transport http {
+            read_timeout 120s
+            write_timeout 120s
+        }
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/skconnector.log
+        format json
+    }
+}

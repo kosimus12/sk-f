@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchDaemon (nicht LaunchAgent!) - bewusst so gewaehlt:
+
+  Ein LaunchAgent laeuft nur in der Sitzung eines angemeldeten Benutzers und
+  wird beim Abmelden beendet. Ein LaunchDaemon startet beim Boot als root und
+  laeuft weiter, wenn der Bildschirm gesperrt ist oder das Login-Fenster
+  angezeigt wird. Genau das brauchen wir hier.
+
+  Ablage:  /Library/LaunchDaemons/de.skfinanzberatung.connector.plist
+  Rechte:  root:wheel 0644
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>de.skfinanzberatung.connector</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/usr/local/libexec/skconnector/agent.py</string>
+        <string>run</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CONNECTOR_STATE</key>
+        <string>/etc/skconnector/agent.json</string>
+        <!-- 1 = haelt den Mac am Netzteil wach, damit er im gesperrten
+             Zustand erreichbar bleibt. Vom Installer gesetzt. -->
+        <key>CONNECTOR_KEEP_AWAKE</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/skconnector/agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/skconnector/agent.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <!-- Verhindert, dass macOS den Prozess bei Leerlauf drosselt. -->
+    <key>LowPriorityIO</key>
+    <false/>
+</dict>
+</plist>

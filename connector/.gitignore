@@ -1,0 +1,11 @@
+# Niemals ins Repo: Tokens und lokaler Zustand
+agent.json
+hub.env
+*.db
+*.db-wal
+*.db-shm
+
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/

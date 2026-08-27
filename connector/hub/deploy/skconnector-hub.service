@@ -1,0 +1,33 @@
+[Unit]
+Description=SK Connector Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=skconnector
+Group=skconnector
+WorkingDirectory=/opt/skconnector
+Environment=CONNECTOR_DB=/var/lib/skconnector/hub.db
+Environment=CONNECTOR_RETENTION_DAYS=30
+EnvironmentFile=/etc/skconnector/hub.env
+ExecStart=/opt/skconnector/venv/bin/uvicorn hub.app:app --host 127.0.0.1 --port 8787 --timeout-keep-alive 75
+Restart=always
+RestartSec=3
+
+# Absicherung: der Hub braucht nur seine Datenbank.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/skconnector
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=SK Connector Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+Environment=CONNECTOR_STATE=/etc/skconnector/agent.json
+ExecStart=/usr/bin/python3 /usr/local/libexec/skconnector/agent.py run
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=false
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
