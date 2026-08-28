@@ -8,6 +8,8 @@ Policy des Hubs und landet in dessen Audit-Log.
 Konfiguration ueber Umgebungsvariablen:
     CONNECTOR_HUB_URL        z.B. https://hub.sk-finanzberatung.de
     CONNECTOR_CONTROL_TOKEN  Control-Token des Hubs
+    CONNECTOR_DEVICE         optional: bindet diesen Server an EIN Geraet
+    CONNECTOR_MCP_NAME       optional: Name, den Claude anzeigt
 """
 
 from __future__ import annotations
@@ -25,11 +27,30 @@ HUB = os.environ.get("CONNECTOR_HUB_URL", "").rstrip("/")
 TOKEN = os.environ.get("CONNECTOR_CONTROL_TOKEN", "")
 DEFAULT_WAIT = int(os.environ.get("CONNECTOR_WAIT_SECONDS", "120"))
 
-server = MCPServer("skconnector")
+# Ein Server pro Geraet: Dann laesst sich in Claude einzeln an- und abschalten,
+# wer gerade erreichbar ist. Das Token dahinter ist zusaetzlich auf dasselbe
+# Geraet beschraenkt - hier wird nur frueher und mit klarerer Meldung geblockt.
+GERAET = os.environ.get("CONNECTOR_DEVICE", "").strip()
+
+server = MCPServer(os.environ.get("CONNECTOR_MCP_NAME", "skconnector"))
 
 
 class HubError(RuntimeError):
     pass
+
+
+def _ziel(device: str) -> str:
+    """Loest die Geraete-ID auf - und haelt einen festgelegten Server bei seinem."""
+    if not GERAET:
+        if not device:
+            raise HubError("Kein Geraet angegeben. 'devices' zeigt die gueltigen IDs.")
+        return device
+    if device and device != GERAET:
+        raise HubError(
+            f"Dieser Connector ist fest auf '{GERAET}' eingestellt. "
+            f"Fuer '{device}' gibt es einen eigenen Connector."
+        )
+    return GERAET
 
 
 def _call(method: str, path: str, body: dict | None = None, timeout: int = 60) -> dict:
@@ -58,6 +79,7 @@ def _call(method: str, path: str, body: dict | None = None, timeout: int = 60) -
 def _dispatch(device: str, kind: str, payload: dict, timeout_s: int,
               wait: bool = True) -> dict:
     """Setzt ein Kommando ab und wartet auf das Ergebnis."""
+    device = _ziel(device)
     cmd = _call("POST", f"/v1/devices/{device}/commands",
                 {"kind": kind, "payload": payload, "timeout_s": timeout_s})
     if not wait:
@@ -93,6 +115,8 @@ def devices() -> str:
     data = _call("GET", "/v1/devices")
     lines = []
     for d in data["devices"]:
+        if GERAET and d["id"] != GERAET:
+            continue
         age = f"{int(time.time() - d['last_seen'])}s" if d.get("last_seen") else "nie"
         state = "online" if d["online"] else "offline"
         if not d["enrolled"]:
@@ -101,13 +125,16 @@ def devices() -> str:
             f"{d['id']:<18} {state:<14} {d['platform']:<8} Modus={d['mode']:<8} "
             f"Besitzer={d['owner']:<8} zuletzt={age:<8} Faehigkeiten={','.join(d['capabilities']) or '-'}"
         )
-    return "\n".join(lines) or "Keine Geraete registriert."
+    if not lines:
+        return (f"Geraet '{GERAET}' ist beim Hub nicht registriert." if GERAET
+                else "Keine Geraete registriert.")
+    return "\n".join(lines)
 
 
 @server.tool()
 def device_info(device: str) -> str:
     """Details zu einem Geraet, inklusive der zuletzt gemeldeten Systemfakten."""
-    return json.dumps(_call("GET", f"/v1/devices/{device}"), indent=2, ensure_ascii=False)
+    return json.dumps(_call("GET", f"/v1/devices/{_ziel(device)}"), indent=2, ensure_ascii=False)
 
 
 @server.tool()
@@ -488,8 +515,10 @@ def command_status(command_id: str) -> str:
 def audit_log(limit: int = 50, device: str = "") -> str:
     """Zeigt die letzten Eintraege des Audit-Logs (wer hat was wann ausgeloest)."""
     path = f"/v1/audit?limit={limit}"
-    if device:
-        path += f"&device_id={device}"
+    # Ein festgelegter Server zeigt auch im Log nur sein eigenes Geraet.
+    ziel = _ziel(device) if (device or GERAET) else ""
+    if ziel:
+        path += f"&device_id={ziel}"
     entries = _call("GET", path)["entries"]
     return "\n".join(
         f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e['ts']))}  "

@@ -1,0 +1,38 @@
+[Unit]
+Description=SK Connector MCP fuer %i (einzeln an- und abwaehlbar in Claude)
+After=network-online.target skconnector-hub.service
+Wants=network-online.target
+Requires=skconnector-hub.service
+
+[Service]
+Type=exec
+User=skconnector
+Group=skconnector
+WorkingDirectory=/opt/skconnector
+
+Environment=CONNECTOR_MCP_TRANSPORT=streamable-http
+Environment=CONNECTOR_MCP_PATH=/mcp
+
+# Pro Instanz: Token, Port, Bind-Adresse, CONNECTOR_DEVICE, CONNECTOR_MCP_NAME.
+# Immer ein ABGESTUFTES Token, das zusaetzlich auf dieses eine Geraet
+# beschraenkt ist - nie das Master-Token.
+EnvironmentFile=/etc/skconnector/mcp-%i.env
+
+ExecStart=/opt/skconnector/venv-mcp/bin/python /opt/skconnector/mcp-server/server.py
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

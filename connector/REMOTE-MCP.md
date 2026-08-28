@@ -147,6 +147,60 @@ Die öffentliche Hub-Adresse, nicht `172.18.0.1` — das Docker-Gateway ist vom
 Container aus nicht erreichbar. Umgebungsvariablen greifen erst in einer
 **neuen** Sitzung; die laufende übernimmt sie nicht.
 
+## Ein Connector pro Gerät
+
+Statt eines Connectors, der alles kann, kann jedes Gerät seinen eigenen
+bekommen. In Claude stehen sie dann als drei Einträge nebeneinander und lassen
+sich einzeln an- und abschalten — Katyas Mac aus, meiner an, der Server aus.
+
+```bash
+cd /opt/src/sk-f/connector
+sudo bash hub/deploy/install-connectors.sh
+```
+
+Je Gerät entsteht:
+
+- ein Token `conn-<gerät>`, das **nur dieses eine Gerät** ansprechen darf
+- ein eigener Dienst `skconnector-mcp@<gerät>` auf eigenem Port (ab 8791)
+- ein eigener geheimer Pfad und damit eine eigene URL
+
+Die Bindung wirkt doppelt: Das Token ist beim Hub auf das Gerät beschränkt, und
+der Server selbst läuft mit `CONNECTOR_DEVICE`. `devices` zeigt in so einem
+Connector nur das eine Gerät, und ein Aufruf auf ein anderes wird mit einer
+klaren Meldung abgewiesen, statt am Hub in einen 403 zu laufen.
+
+Standard ist `--ceiling readonly`. Höher geht mit `--ceiling full`, aber dann
+kann jede Chat-Sitzung auf dem Gerät schreiben und Programme steuern — und
+Chat-Sitzungen verarbeiten ständig fremde Inhalte. Der Weg für Schreibendes ist
+Claude Code, nicht ein hochgestufter Browser-Connector.
+
+Einzelne Geräte:
+
+```bash
+sudo bash hub/deploy/install-connectors.sh --devices mac-simon,hetzner
+```
+
+### Der Caddyfile
+
+Anders als `install-mcp.sh` fasst dieses Skript den Caddyfile selbst an — es
+muss drei Pfade unter einem Hostnamen zusammenfassen, und von Hand ist das die
+Stelle, an der es zweimal schiefgegangen ist. Abgesichert ist es so: Es wird
+genau der Block mit diesem Hostnamen ersetzt, alles andere bleibt Zeichen für
+Zeichen stehen, vorher entsteht eine Kopie `Caddyfile.bak-<zeitstempel>`, und
+wenn Caddy die neue Konfiguration ablehnt, wird die Kopie zurückgespielt.
+`--kein-caddy` schaltet das ab; der Block liegt dann in
+`/etc/skconnector/caddy-connectors.conf`.
+
+### Einen Connector wieder loswerden
+
+```bash
+python3 tools/skconnect.py token-revoke conn-mac-katya
+sudo systemctl disable --now skconnector-mcp@mac-katya
+```
+
+Zum vorübergehenden Abschalten genügt der Schalter in Claude — das Token bleibt
+gültig, der Dienst läuft weiter, nur greift niemand mehr darauf zu.
+
 ## Die drei Oberflächen im Vergleich
 
 | | Transport | Token | Was geht |

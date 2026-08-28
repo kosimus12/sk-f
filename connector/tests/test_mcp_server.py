@@ -77,3 +77,65 @@ def test_run_formats_stdout_and_exit_code(module, monkeypatch):
     })
     out = module.run("mac-simon", "uptime")
     assert "exit=0" in out and "up 3 days" in out
+
+
+# ---------------------------------------------------------------------------
+# Ein Server pro Geraet
+# ---------------------------------------------------------------------------
+
+def test_ohne_bindung_bleibt_das_geraet_frei(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "")
+    assert module._ziel("mac-katya") == "mac-katya"
+
+
+def test_ohne_bindung_und_ohne_geraet_kommt_eine_klare_meldung(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "")
+    with pytest.raises(module.HubError) as exc:
+        module._ziel("")
+    assert "devices" in str(exc.value)
+
+
+def test_gebundener_server_ergaenzt_das_geraet(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "mac-simon")
+    assert module._ziel("") == "mac-simon"
+    assert module._ziel("mac-simon") == "mac-simon"
+
+
+def test_gebundener_server_verweigert_ein_fremdes_geraet(module, monkeypatch):
+    """Der Connector fuer meinen Mac darf Katyas Mac nicht anfassen."""
+    monkeypatch.setattr(module, "GERAET", "mac-simon")
+    with pytest.raises(module.HubError) as exc:
+        module._ziel("mac-katya")
+    assert "mac-simon" in str(exc.value) and "mac-katya" in str(exc.value)
+
+
+def test_gebundener_server_listet_nur_sein_geraet(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "mac-simon")
+    monkeypatch.setattr(module, "_call", lambda *a, **k: {"devices": [
+        {"id": "mac-simon", "online": True, "enrolled": True, "platform": "macos",
+         "mode": "full", "owner": "simon", "last_seen": 0, "capabilities": ["shell"]},
+        {"id": "mac-katya", "online": True, "enrolled": True, "platform": "macos",
+         "mode": "full", "owner": "katya", "last_seen": 0, "capabilities": ["shell"]},
+    ]})
+    out = module.devices()
+    assert "mac-simon" in out
+    assert "mac-katya" not in out
+
+
+def test_gebundener_server_meldet_wenn_sein_geraet_fehlt(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "mac-simon")
+    monkeypatch.setattr(module, "_call", lambda *a, **k: {"devices": []})
+    assert "mac-simon" in module.devices()
+
+
+def test_audit_log_bleibt_beim_eigenen_geraet(module, monkeypatch):
+    monkeypatch.setattr(module, "GERAET", "mac-simon")
+    gesehen = {}
+
+    def fake_call(method, path, *a, **k):
+        gesehen["path"] = path
+        return {"entries": []}
+
+    monkeypatch.setattr(module, "_call", fake_call)
+    module.audit_log()
+    assert "device_id=mac-simon" in gesehen["path"]
