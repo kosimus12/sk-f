@@ -140,3 +140,24 @@ def test_audit_log_bleibt_beim_eigenen_geraet(module, monkeypatch):
     monkeypatch.setattr(module, "_call", fake_call)
     module.audit_log()
     assert "device_id=mac-simon" in gesehen["path"]
+
+
+# ---------------------------------------------------------------------------
+# Wartezeiten
+# ---------------------------------------------------------------------------
+
+def test_dispatch_gibt_vor_dem_abbruch_des_aufrufers_auf(module, monkeypatch):
+    """Claude bricht nach 60s ab - ohne Text. Vorher selbst aufhoeren ist besser."""
+    monkeypatch.setattr(module, "MAX_WAIT", 0.2)
+    monkeypatch.setattr(module.time, "sleep", lambda _s: None)
+
+    def fake_call(method, path, body=None, timeout=60):
+        if method == "POST":
+            return {"id": "c-123", "status": "queued"}
+        return {"id": "c-123", "status": "queued"}
+
+    monkeypatch.setattr(module, "_call", fake_call)
+    out = module._dispatch("mac-simon", "app.list", {}, 120)
+    assert out["status"] == "pending"
+    assert out["command_id"] == "c-123"
+    assert "command_status" in out["note"]

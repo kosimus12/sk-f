@@ -27,6 +27,11 @@ HUB = os.environ.get("CONNECTOR_HUB_URL", "").rstrip("/")
 TOKEN = os.environ.get("CONNECTOR_CONTROL_TOKEN", "")
 DEFAULT_WAIT = int(os.environ.get("CONNECTOR_WAIT_SECONDS", "120"))
 
+# Claude bricht einen Werkzeugaufruf nach 60 Sekunden ab - und zwar ohne Text,
+# der Aufrufer sieht nur 'timed out'. Deshalb geben wir vorher selbst auf und
+# liefern die Kommando-ID zurueck, mit der sich das Ergebnis nachholen laesst.
+MAX_WAIT = float(os.environ.get("CONNECTOR_MAX_WAIT", "50"))
+
 # Ein Server pro Geraet: Dann laesst sich in Claude einzeln an- und abschalten,
 # wer gerade erreichbar ist. Das Token dahinter ist zusaetzlich auf dasselbe
 # Geraet beschraenkt - hier wird nur frueher und mit klarerer Meldung geblockt.
@@ -85,7 +90,7 @@ def _dispatch(device: str, kind: str, payload: dict, timeout_s: int,
     if not wait:
         return {"command_id": cmd["id"], "status": cmd["status"]}
 
-    deadline = time.time() + timeout_s + 15
+    deadline = time.time() + min(timeout_s + 15, MAX_WAIT)
     delay = 0.5
     while time.time() < deadline:
         time.sleep(delay)
@@ -99,7 +104,8 @@ def _dispatch(device: str, kind: str, payload: dict, timeout_s: int,
                 "error": current.get("error"),
             }
     return {"command_id": cmd["id"], "status": "pending",
-            "note": "Ergebnis steht noch aus - spaeter mit command_status abrufen"}
+            "note": "Das Geraet rechnet noch. Ergebnis mit command_status und "
+                    "dieser command_id abholen."}
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +248,9 @@ def list_dir(device: str, path: str, limit: int = 200) -> str:
 @server.tool()
 def app_list(device: str) -> str:
     """Listet die laufenden Programme mit sichtbarem Fenster."""
-    out = _dispatch(device, "app.list", {}, 60)
+    # AppleScript gegen System Events braucht auf einem beschaeftigten Mac
+    # gern 20 bis 30 Sekunden - deshalb knapp unter dem Abbruch des Aufrufers.
+    out = _dispatch(device, "app.list", {}, 40)
     if out["status"] != "done":
         return f"[{out['status']}] {out.get('error')}"
     return "\n".join(
