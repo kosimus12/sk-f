@@ -207,20 +207,40 @@ fi
 # ---------------------------------------------------------------------------
 schritt "6/6  In Claude eintragen"
 
+# Die URLs werden NICHT gedruckt. Eine gedruckte URL steht im Scrollback und
+# landet damit irgendwann in einem Chat oder auf einem Screenshot - viermal
+# passiert, jedes Mal musste der Pfad danach erneuert werden. Sie stehen in
+# einer Datei mit 0600; angezeigt wird nur, welches Geraet welchen Anfang hat.
+URLDATEI="$CONF/connector-urls.txt"
+install -m 0600 -o root -g root /dev/null "$URLDATEI"
+python3 "$INST" urls "$CONF" "$HOSTNAME_MCP" | while IFS=$'\t' read -r GERAET URL; do
+  echo "$GERAET"$'\t'"$URL"
+done > "$URLDATEI"
+chmod 0600 "$URLDATEI"
+
 cat <<TEXT
 
     Einstellungen > Connectors > Custom Connector hinzufuegen,
-    einmal pro Zeile. Jeder laesst sich danach einzeln an- und abschalten.
+    einmal pro Geraet. Jeder laesst sich danach einzeln an- und abschalten.
+
+    Die URLs stehen in $URLDATEI (0600):
 
 TEXT
-python3 "$INST" urls "$CONF" "$HOSTNAME_MCP" | while IFS=$'\t' read -r GERAET URL; do
-  echo "        $GERAET"
-  echo "            $URL"
-  echo
-done
+while IFS=$'\t' read -r GERAET URL; do
+  echo "        $GERAET   ...${URL: -12}"
+done < "$URLDATEI"
+
+cat <<TEXT
+
+    Vom Mac aus in die Zwischenablage, ohne sie auf den Bildschirm zu holen
+    (im Terminal AUF DEM MAC, nicht in dieser ssh-Sitzung):
+
+        ssh root@hetzner "grep '^mac-simon' $URLDATEI | cut -f2" | tr -d '\\n' | pbcopy
+
+TEXT
 
 echo "${GELB}    Diese URLs sind Passwoerter.${AUS} Nicht in Chats, nicht in Screenshots,"
-echo "    nicht ins Repo. Sie stehen auch in $BLOCK (0600)."
+echo "    nicht ins Repo."
 echo
 echo "${BLAU}    Stufe eines Geraets aendern, ohne die URL zu verlieren:${AUS}"
 echo "        sudo bash hub/deploy/install-connectors.sh --devices <geraet> --ceiling full"

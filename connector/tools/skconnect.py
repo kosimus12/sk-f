@@ -29,13 +29,49 @@ import time
 import urllib.error
 import urllib.request
 
+HUB_ENV = "/etc/skconnector/hub.env"
+
+
+def aus_hub_env() -> tuple[str, str]:
+    """Auf dem Hetzner steht alles Noetige schon in hub.env.
+
+    Wer sich per ssh anmeldet, hat eine frische Shell ohne die Variablen und
+    muss sie sonst jedes Mal von Hand exportieren - eine Zeile, die dabei zu
+    leicht mit dem Token statt mit dem Muster gefuellt wird.
+    """
+    try:
+        with open(HUB_ENV, encoding="utf-8") as f:
+            inhalt = f.read()
+    except OSError:
+        return "", ""
+    werte = {}
+    for zeile in inhalt.splitlines():
+        zeile = zeile.strip()
+        if zeile and not zeile.startswith("#") and "=" in zeile:
+            name, wert = zeile.split("=", 1)
+            werte[name.strip()] = wert.strip()
+    token = werte.get("CONNECTOR_CONTROL_TOKEN", "")
+    bind = werte.get("CONNECTOR_BIND", "127.0.0.1")
+    port = werte.get("CONNECTOR_PORT", "8787")
+    if bind in ("0.0.0.0", "*", ""):
+        bind = "127.0.0.1"
+    return (f"http://{bind}:{port}" if token else ""), token
+
+
 HUB = os.environ.get("CONNECTOR_HUB_URL", "").rstrip("/")
 TOKEN = os.environ.get("CONNECTOR_CONTROL_TOKEN", "")
+if not HUB or not TOKEN:
+    _hub, _token = aus_hub_env()
+    HUB = HUB or _hub
+    TOKEN = TOKEN or _token
 
 
 def call(method: str, path: str, body: dict | None = None, timeout: int = 60) -> dict:
     if not HUB or not TOKEN:
-        sys.exit("CONNECTOR_HUB_URL und CONNECTOR_CONTROL_TOKEN muessen gesetzt sein.")
+        sys.exit(
+            "CONNECTOR_HUB_URL und CONNECTOR_CONTROL_TOKEN muessen gesetzt sein "
+            f"(oder {HUB_ENV} lesbar - dann genuegt sudo)."
+        )
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(HUB + path, data=data, method=method)
     req.add_header("Authorization", f"Bearer {TOKEN}")

@@ -186,6 +186,18 @@ von dort gelesen, nicht neu vergeben. Die bereits in Claude eingetragenen URLs
 bleiben also gültig, auch wenn du nur die Stufe änderst. Der Caddy-Block wird
 trotzdem immer aus **allen** eingerichteten Geräten gebaut.
 
+### Die URLs
+
+Gedruckt werden sie nicht — eine URL im Scrollback landet irgendwann in einem
+Chat oder auf einem Screenshot. Sie stehen in `/etc/skconnector/connector-urls.txt`
+(0600), das Skript zeigt nur die letzten Zeichen zur Zuordnung. In die
+Zwischenablage, ohne sie anzusehen, **in einem Terminal auf dem Mac**:
+
+```bash
+ssh root@hetzner "grep '^mac-simon' /etc/skconnector/connector-urls.txt | cut -f2" \
+  | tr -d '\n' | pbcopy
+```
+
 Wenn eine URL doch einmal irgendwo gelandet ist, wo sie nicht hingehört:
 
 ```bash
