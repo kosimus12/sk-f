@@ -254,3 +254,18 @@ python3 tools/skconnect.py audit --limit 100
 
 Da steht jedes Kommando mit Zeitstempel, Gerät und Ergebnis. Wenn dort etwas
 auftaucht, das du nicht erwartet hast, ist `killswitch on` der erste Griff.
+
+## Nach jedem `git pull`
+
+Der Hub läuft aus `/opt/skconnector/hub`, nicht aus dem Arbeitsverzeichnis.
+Neue Endpunkte antworten sonst mit `404`, obwohl der Code da ist:
+
+```bash
+cd /opt/src/sk-f && git pull && cd connector
+sudo bash hub/deploy/update.sh
+```
+
+Das Skript kopiert `hub/` und `mcp-server/` nach `/opt/skconnector`, prüft die
+Abhängigkeiten, startet Hub und alle `skconnector-mcp@*`-Dienste neu und
+wartet auf `healthz`. Kommt der Hub nicht hoch, wird der vorherige Stand
+zurückgespielt.

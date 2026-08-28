@@ -31,10 +31,15 @@ Was es **nicht** löst, ehrlich gesagt:
 Auf dem Hetzner, einmalig:
 
 ```bash
-cd /opt/src/sk-f/connector
+cd /opt/src/sk-f && git pull && cd connector
+sudo bash hub/deploy/update.sh    # der laufende Hub muss den Endpunkt kennen
 sudo apt install -y qrencode      # optional, für den QR-Code im Terminal
 sudo python3 tools/skconnect.py totp-enroll
 ```
+
+Ohne `update.sh` antwortet `totp-enroll` mit `404`: Der Hub läuft aus
+`/opt/skconnector/hub`, nicht aus dem Git-Verzeichnis, und ein `git pull`
+allein erreicht ihn nicht.
 
 Der QR-Code wird direkt im Terminal gezeichnet — mit Google Authenticator,
 1Password, Aegis oder der iOS-Passwörter-App scannen. Ohne `qrencode` wird
