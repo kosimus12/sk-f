@@ -174,11 +174,26 @@ kann jede Chat-Sitzung auf dem Gerät schreiben und Programme steuern — und
 Chat-Sitzungen verarbeiten ständig fremde Inhalte. Der Weg für Schreibendes ist
 Claude Code, nicht ein hochgestufter Browser-Connector.
 
-Einzelne Geräte:
+Einzelne Geräte, ohne die anderen anzufassen:
 
 ```bash
-sudo bash hub/deploy/install-connectors.sh --devices mac-simon,hetzner
+sudo bash hub/deploy/install-connectors.sh --devices mac-simon,hetzner --ceiling full
 ```
+
+Ein solcher Lauf behält Port und URL der genannten Geräte und lässt die
+übrigen unberührt — beides steht in `/etc/skconnector/mcp-<gerät>.env` und wird
+von dort gelesen, nicht neu vergeben. Die bereits in Claude eingetragenen URLs
+bleiben also gültig, auch wenn du nur die Stufe änderst. Der Caddy-Block wird
+trotzdem immer aus **allen** eingerichteten Geräten gebaut.
+
+Wenn eine URL doch einmal irgendwo gelandet ist, wo sie nicht hingehört:
+
+```bash
+sudo bash hub/deploy/install-connectors.sh --devices mac-simon --neuer-pfad
+```
+
+Dann bekommt genau dieses Gerät einen neuen geheimen Pfad; der Eintrag in
+Claude muss einmal aktualisiert werden, die anderen bleiben.
 
 ### Der Caddyfile
 

@@ -13,6 +13,7 @@ CEILING="readonly"
 DEVICES="mac-simon mac-katya hetzner"
 PORT_BASIS=8791
 CADDY_ANWENDEN=1
+NEUER_PFAD=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --devices)    DEVICES="${2//,/ }"; shift 2 ;;
     --port-basis) PORT_BASIS="$2"; shift 2 ;;
     --kein-caddy) CADDY_ANWENDEN=0; shift ;;
+    --neuer-pfad) NEUER_PFAD=1; shift ;;
     -h|--help)    sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1" >&2; exit 1 ;;
   esac
@@ -103,14 +105,22 @@ ok "mcp-server, venv-mcp und Template-Unit sind aktuell"
 schritt "4/6  Pro Geraet: Token, Dienst, geheimer Pfad"
 
 install -d -m 0750 -o root -g skconnector "$CONF"
-BLOCK="$CONF/caddy-connectors.conf"
-install -m 0600 -o root -g root /dev/null "$BLOCK"
-echo "$HOSTNAME_MCP {" > "$BLOCK"
+INST="$SRC_DIR/hub/deploy/instances.py"
 
-URLS=""
-PORT=$PORT_BASIS
 for GERAET in $DEVICES; do
   LABEL="conn-$GERAET"
+
+  # Port und geheimer Pfad kommen aus dem Bestand, nicht aus der Position in
+  # der Liste. Sonst bekommt ein Lauf mit --devices einen schon belegten Port,
+  # und eine bereits in Claude eingetragene URL wird ohne Not ungueltig.
+  PORT="$(python3 "$INST" port "$CONF" "$GERAET" "$PORT_BASIS")"
+  GEHEIM="$(python3 "$INST" secret "$CONF" "$GERAET")"
+  if [[ -z "$GEHEIM" || "$NEUER_PFAD" == "1" ]]; then
+    GEHEIM="$(openssl rand -hex 32)"
+    NEU_MARKE="  (neue URL)"
+  else
+    NEU_MARKE=""
+  fi
 
   curl -s -o /dev/null -X DELETE "$HUB_URL/v1/control-tokens/$LABEL" \
     -H "Authorization: Bearer $MASTER" || true
@@ -133,35 +143,15 @@ CONNECTOR_DEVICE=$GERAET
 CONNECTOR_MCP_NAME=$GERAET
 CONNECTOR_MCP_BIND=$GATEWAY
 CONNECTOR_MCP_PORT=$PORT
+# Nur fuer den Installer - der Dienst liest das nicht.
+CONNECTOR_SECRET_PATH=$GEHEIM
 ENVEOF
   chmod 0640 "$ENVDATEI"; chown root:skconnector "$ENVDATEI"
 
-  systemctl enable --now "skconnector-mcp@$GERAET" >/dev/null 2>&1
+  systemctl enable "skconnector-mcp@$GERAET" >/dev/null 2>&1
   systemctl restart "skconnector-mcp@$GERAET"
-
-  GEHEIM="$(openssl rand -hex 32)"
-  cat >> "$BLOCK" <<CADDYEOF
-    handle_path /$GEHEIM/* {
-        reverse_proxy $GATEWAY:$PORT {
-            transport http {
-                read_timeout 300s
-                write_timeout 300s
-            }
-        }
-    }
-CADDYEOF
-  URLS+="        $GERAET"$'\n'"            https://$HOSTNAME_MCP/$GEHEIM/mcp"$'\n\n'
-  ok "$GERAET: Port $PORT, Token '$LABEL' (nur dieses Geraet, $CEILING)"
-  PORT=$((PORT + 1))
+  ok "$GERAET: Port $PORT, Token '$LABEL' (nur dieses Geraet, $CEILING)$NEU_MARKE"
 done
-
-cat >> "$BLOCK" <<'CADDYEOF'
-    handle {
-        respond "Not found" 404
-    }
-}
-CADDYEOF
-chmod 0600 "$BLOCK"
 
 sleep 3
 for GERAET in $DEVICES; do
@@ -171,6 +161,14 @@ for GERAET in $DEVICES; do
     exit 1; }
 done
 ok "Alle Dienste laufen"
+
+# Der Block enthaelt IMMER alle eingerichteten Geraete, nicht nur die dieses
+# Laufs - sonst faellt beim naechsten '--devices' der Rest aus dem Netz.
+BLOCK="$CONF/caddy-connectors.conf"
+install -m 0600 -o root -g root /dev/null "$BLOCK"
+python3 "$INST" block "$CONF" "$HOSTNAME_MCP" "$GATEWAY" > "$BLOCK"
+chmod 0600 "$BLOCK"
+ok "Caddy-Block umfasst: $(python3 "$INST" urls "$CONF" "$HOSTNAME_MCP" | cut -f1 | tr '\n' ' ')"
 
 # ---------------------------------------------------------------------------
 schritt "5/6  Caddy"
@@ -214,14 +212,26 @@ cat <<TEXT
     Einstellungen > Connectors > Custom Connector hinzufuegen,
     einmal pro Zeile. Jeder laesst sich danach einzeln an- und abschalten.
 
-$URLS
 TEXT
+python3 "$INST" urls "$CONF" "$HOSTNAME_MCP" | while IFS=$'\t' read -r GERAET URL; do
+  echo "        $GERAET"
+  echo "            $URL"
+  echo
+done
 
 echo "${GELB}    Diese URLs sind Passwoerter.${AUS} Nicht in Chats, nicht in Screenshots,"
 echo "    nicht ins Repo. Sie stehen auch in $BLOCK (0600)."
 echo
+echo "${BLAU}    Stufe eines Geraets aendern, ohne die URL zu verlieren:${AUS}"
+echo "        sudo bash hub/deploy/install-connectors.sh --devices <geraet> --ceiling full"
+echo
+echo "${BLAU}    Nur die URL erneuern (wenn sie irgendwo gelandet ist, wo sie nicht hingehoert):${AUS}"
+echo "        sudo bash hub/deploy/install-connectors.sh --devices <geraet> --neuer-pfad"
+echo
 echo "${BLAU}    Einen Connector wieder loswerden:${AUS}"
-echo "        skconnect.py token-revoke conn-<geraet>"
+echo "        python3 tools/skconnect.py token-revoke conn-<geraet>"
 echo "        sudo systemctl disable --now skconnector-mcp@<geraet>"
+echo "        sudo rm $CONF/mcp-<geraet>.env"
+echo "        sudo bash hub/deploy/install-connectors.sh --devices <ein-verbleibendes-geraet>"
 echo
 echo "${GRUEN}==> Fertig.${AUS}"
