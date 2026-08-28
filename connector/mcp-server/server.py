@@ -529,6 +529,38 @@ def audit_log(limit: int = 50, device: str = "") -> str:
 
 
 @server.tool()
+def unlock(code: str) -> str:
+    """Schaltet diesen Zugang mit dem Code aus der Authenticator-App frei.
+
+    Wenn ein Aufruf mit 'Zweite Schranke' abgelehnt wird: den Menschen nach
+    dem aktuellen sechsstelligen Code fragen und ihn hier eingeben. Den Code
+    NIE raten, nie aus dem Verlauf wiederverwenden - er gilt nur einmal.
+    """
+    out = _call("POST", "/v1/unlock", {"code": code})
+    minuten = int(out.get("seconds", 0) / 60)
+    zusatz = f" ({out['note']})" if out.get("note") not in (None, "ok") else ""
+    return f"Freigeschaltet fuer {minuten} Minuten{zusatz}."
+
+
+@server.tool()
+def lock() -> str:
+    """Beendet die Freischaltung sofort - fuer diesen Zugang."""
+    _call("POST", "/v1/lock")
+    return "Gesperrt. Der naechste Zugriff braucht wieder einen Code."
+
+
+@server.tool()
+def lock_status() -> str:
+    """Zeigt, ob dieser Zugang gerade freigeschaltet ist und wie lange noch."""
+    out = _call("GET", "/v1/unlock")
+    if not out.get("totp_aktiv"):
+        return "Zweite Schranke ist nicht eingerichtet."
+    if out.get("unlocked"):
+        return f"Freigeschaltet, noch {out['seconds_left']}s."
+    return "Gesperrt - 'unlock' mit dem Code aus der Authenticator-App."
+
+
+@server.tool()
 def killswitch(state: str) -> str:
     """Schaltet den Not-Aus des Hubs ('on' = keine Kommandos mehr, 'off' = normal)."""
     if state not in ("on", "off"):

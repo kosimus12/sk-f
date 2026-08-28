@@ -14,7 +14,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from . import security
+from . import security, totp
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -82,6 +82,31 @@ CREATE TABLE IF NOT EXISTS control_tokens (
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
+);
+
+-- Zweite Schranke: ein Token allein reicht nicht mehr, es braucht einen Code
+-- aus der Authenticator-App. Ein Token liegt in einer Konfiguration, der Code
+-- liegt auf einem Telefon.
+CREATE TABLE IF NOT EXISTS totp (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    secret        TEXT NOT NULL,
+    last_counter  INTEGER,
+    created_at    REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    code_hash  TEXT PRIMARY KEY,
+    used_at    REAL,
+    created_at REAL NOT NULL
+);
+
+-- Eine Freischaltung gilt je Token und nur fuer eine begrenzte Zeit.
+CREATE TABLE IF NOT EXISTS unlocks (
+    label     TEXT PRIMARY KEY,
+    until     REAL NOT NULL,
+    since     REAL NOT NULL,
+    fails     INTEGER NOT NULL DEFAULT 0,
+    blocked_until REAL
 );
 """
 
@@ -170,6 +195,124 @@ class Store:
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+
+    # -- Zweite Schranke: TOTP --------------------------------------------
+    #
+    # Der Bedrohungsfall ist nicht der verlorene Server, sondern der
+    # uebernommene Claude-Account. Dort liegt ein Control-Token; das Telefon
+    # mit der Authenticator-App liegt woanders.
+
+    MAX_FEHLVERSUCHE = 5
+    SPERRE_S = 900.0
+
+    def totp_aktiv(self) -> bool:
+        with self.conn() as c:
+            return c.execute("SELECT 1 FROM totp WHERE id=1").fetchone() is not None
+
+    def totp_einrichten(self, secret: str, notfallcodes: list[str]) -> None:
+        """Ersetzt eine bestehende Einrichtung - alte Codes gelten danach nicht mehr."""
+        with self.conn() as c:
+            c.execute("DELETE FROM totp")
+            c.execute("DELETE FROM recovery_codes")
+            c.execute("INSERT INTO totp(id,secret,created_at) VALUES(1,?,?)",
+                      (secret, _now()))
+            for code in notfallcodes:
+                c.execute("INSERT INTO recovery_codes(code_hash,created_at) VALUES(?,?)",
+                          (security.hash_token(code), _now()))
+            c.execute("DELETE FROM unlocks")
+
+    def totp_abschalten(self) -> None:
+        with self.conn() as c:
+            c.execute("DELETE FROM totp")
+            c.execute("DELETE FROM recovery_codes")
+            c.execute("DELETE FROM unlocks")
+
+    def _totp_row(self, c: sqlite3.Connection) -> sqlite3.Row | None:
+        return c.execute("SELECT * FROM totp WHERE id=1").fetchone()
+
+    def entsperrt_bis(self, label: str) -> float:
+        """0.0, wenn dieses Token gerade nicht freigeschaltet ist."""
+        with self.conn() as c:
+            row = c.execute("SELECT until FROM unlocks WHERE label=?", (label,)).fetchone()
+        return float(row["until"]) if row and row["until"] > _now() else 0.0
+
+    def sperre_bis(self, label: str) -> float:
+        """Nach zu vielen Fehlversuchen ist eine Weile Ruhe."""
+        with self.conn() as c:
+            row = c.execute("SELECT blocked_until FROM unlocks WHERE label=?",
+                            (label,)).fetchone()
+        if row and row["blocked_until"] and row["blocked_until"] > _now():
+            return float(row["blocked_until"])
+        return 0.0
+
+    def entsperren(self, label: str, code: str, dauer_s: float) -> tuple[bool, str]:
+        """Prueft den Code und schaltet dieses eine Token fuer eine Weile frei."""
+        jetzt = _now()
+        gesperrt = self.sperre_bis(label)
+        if gesperrt:
+            return False, f"zu viele Fehlversuche - wieder frei in {int(gesperrt - jetzt)}s"
+
+        with self.conn() as c:
+            row = self._totp_row(c)
+            if row is None:
+                return False, "Zweite Schranke ist nicht eingerichtet"
+
+            zaehler = totp.pruefe(row["secret"], code, jetzt, row["last_counter"])
+            per_notfall = False
+            if zaehler is None:
+                # Notfallcode? Einer davon, genau einmal.
+                ch = security.hash_token(code.strip())
+                treffer = c.execute(
+                    "SELECT 1 FROM recovery_codes WHERE code_hash=? AND used_at IS NULL",
+                    (ch,),
+                ).fetchone()
+                if treffer is None:
+                    c.execute(
+                        "INSERT INTO unlocks(label,until,since,fails) VALUES(?,0,?,1) "
+                        "ON CONFLICT(label) DO UPDATE SET fails=fails+1",
+                        (label, jetzt),
+                    )
+                    fails = c.execute("SELECT fails FROM unlocks WHERE label=?",
+                                      (label,)).fetchone()["fails"]
+                    if fails >= self.MAX_FEHLVERSUCHE:
+                        c.execute("UPDATE unlocks SET blocked_until=?, fails=0 WHERE label=?",
+                                  (jetzt + self.SPERRE_S, label))
+                        return False, (f"zu viele Fehlversuche - gesperrt fuer "
+                                       f"{int(self.SPERRE_S / 60)} Minuten")
+                    return False, f"Code stimmt nicht ({self.MAX_FEHLVERSUCHE - fails} Versuche uebrig)"
+                c.execute("UPDATE recovery_codes SET used_at=? WHERE code_hash=?", (jetzt, ch))
+                per_notfall = True
+            else:
+                c.execute("UPDATE totp SET last_counter=? WHERE id=1", (zaehler,))
+
+            c.execute(
+                "INSERT INTO unlocks(label,until,since,fails,blocked_until) "
+                "VALUES(?,?,?,0,NULL) "
+                "ON CONFLICT(label) DO UPDATE SET until=excluded.until, "
+                "since=excluded.since, fails=0, blocked_until=NULL",
+                (label, jetzt + dauer_s, jetzt),
+            )
+        return True, "Notfallcode verbraucht" if per_notfall else "ok"
+
+    def sperren(self, label: str) -> None:
+        with self.conn() as c:
+            c.execute("DELETE FROM unlocks WHERE label=?", (label,))
+
+    def alles_sperren(self) -> int:
+        with self.conn() as c:
+            return c.execute("DELETE FROM unlocks").rowcount
+
+    def offene_freischaltungen(self) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute("SELECT label,until,since FROM unlocks WHERE until>?",
+                             (_now(),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def notfallcodes_uebrig(self) -> int:
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM recovery_codes WHERE used_at IS NULL").fetchone()
+        return int(row["n"])
 
     # -- Abgestufte Control-Tokens ----------------------------------------
     #

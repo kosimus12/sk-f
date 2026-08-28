@@ -61,6 +61,7 @@ connector/
 
 ANLEITUNG.md      Einrichtung beider Macs: lesen+schreiben, Browser, Programme
 REMOTE-MCP.md     Claude Chat und Cowork anbinden (abgestufte Tokens)
+ZWEITE-SCHRANKE.md  TOTP: Zugriff nur mit Code aus der Authenticator-App
 SECURITY-REVIEW.md  Due Diligence, Befunde und verbleibende Risiken
 RUNBOOK.md        Kurzfassung der Einrichtung
 SECURITY.md       Sicherheitsmodell, Grenzen, Empfehlungen
@@ -301,6 +302,9 @@ skconnect.py add iphone-katya "iPhone (Katya)" ios \
 
 Ausführlich in [`SECURITY.md`](SECURITY.md). Die Kurzfassung:
 
+* **Zweite Schranke**: ein Code aus der Authenticator-App, alle 30 Sekunden
+  neu. Ein gestohlenes Control-Token allein reicht dann nicht mehr — siehe
+  [`ZWEITE-SCHRANKE.md`](ZWEITE-SCHRANKE.md).
 * **Drei Berechtigungsstufen** je Gerät: `notify` (nur Mitteilungen),
   `readonly` (lesen), `full` (Shell und Schreiben).
 * **Deny-Liste** blockt zerstörerische Befehle schon im Hub, bevor sie ein Gerät

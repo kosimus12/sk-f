@@ -16,6 +16,8 @@ Environment=CONNECTOR_RETENTION_DAYS=30
 # Dann in /etc/skconnector/hub.env setzen:  CONNECTOR_BIND=172.17.0.1
 Environment=CONNECTOR_BIND=127.0.0.1
 Environment=CONNECTOR_PORT=8787
+# Wie lange eine Freischaltung mit dem Authenticator-Code gilt.
+Environment=CONNECTOR_UNLOCK_SECONDS=900
 EnvironmentFile=/etc/skconnector/hub.env
 ExecStart=/opt/skconnector/venv/bin/uvicorn hub.app:app --host ${CONNECTOR_BIND} --port ${CONNECTOR_PORT} --timeout-keep-alive 75
 Restart=always

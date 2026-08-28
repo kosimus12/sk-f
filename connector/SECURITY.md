@@ -4,6 +4,26 @@ Dieser Konnektor gibt einem Sprachmodell Shell-Zugriff auf deine Rechner. Das
 ist mächtig und entsprechend heikel. Dieses Dokument sagt, was ihn absichert —
 und was er ausdrücklich **nicht** leistet.
 
+## Zweite Schranke (TOTP)
+
+Seit Version 1.4 kann jeder Zugriff zusätzlich einen zeitbasierten Code
+verlangen. Der Bedrohungsfall dahinter ist nicht der verlorene Server, sondern
+der übernommene Claude-Account: Dort liegen die Control-Tokens, das Telefon mit
+der Authenticator-App liegt woanders. Details, Grenzen und der Weg zurück bei
+verlorenem Telefon stehen in [`ZWEITE-SCHRANKE.md`](ZWEITE-SCHRANKE.md).
+
+Kurz:
+
+* Freischaltung gilt **je Token** und **15 Minuten** (`CONNECTOR_UNLOCK_SECONDS`).
+* Ein Code gilt **genau einmal**, auch für ein anderes Token — Mitlesen und
+  Nachspielen scheitert.
+* Nach fünf Fehlversuchen ist das Token 15 Minuten gesperrt.
+* Das **Master-Token aus `hub.env` ist ausgenommen** — sonst gäbe es keinen Weg
+  zurück. Wer root auf dem Hetzner hat, umgeht die Schranke; dort hängt die
+  Sicherheit weiterhin an SSH.
+* `unlock.failed` und `unlock.required` im Audit-Log zeigen, wenn jemand mit
+  einem gültigen Token ohne Code anklopft.
+
 ## Vertrauensgrenzen
 
 ```

@@ -205,6 +205,74 @@ def token_ziel(label: str, explizit: str) -> pathlib.Path:
     return pathlib.Path(f"{label}.token")
 
 
+def cmd_totp_enroll(args: argparse.Namespace) -> None:
+    out = call("POST", "/v1/totp/enroll")
+    print("Zweite Schranke eingerichtet. Alle Freischaltungen sind beendet.")
+    print()
+    print("In der Authenticator-App einrichten - QR-Code scannen:")
+    print()
+    qr = _qr(out["otpauth"])
+    if qr:
+        print(qr)
+    else:
+        print("  (kein 'qrencode' installiert - dann von Hand eintragen)")
+        print(f"  Name:        SK Connector")
+        print(f"  Geheimnis:   {out['secret']}")
+        print(f"  Zeitbasiert, 6 Stellen, 30 Sekunden")
+    print()
+    print("Notfallcodes - einmal verwendbar, an einen sicheren Ort:")
+    for code in out["recovery_codes"]:
+        print(f"    {code}")
+    print()
+    print("Diese Ausgabe erscheint genau einmal.")
+
+
+def _qr(text: str) -> str | None:
+    import shutil
+    import subprocess
+    if not shutil.which("qrencode"):
+        return None
+    try:
+        return subprocess.run(["qrencode", "-t", "ANSIUTF8", text],
+                              capture_output=True, text=True, timeout=10,
+                              check=True).stdout
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def cmd_totp_disable(args: argparse.Namespace) -> None:
+    print(json.dumps(call("POST", "/v1/totp/disable"), ensure_ascii=False))
+
+
+def cmd_unlock(args: argparse.Namespace) -> None:
+    out = call("POST", "/v1/unlock", {"code": args.code})
+    print(f"Freigeschaltet fuer {int(out['seconds'] / 60)} Minuten.")
+
+
+def cmd_lock(args: argparse.Namespace) -> None:
+    pfad = "/v1/lock?alle=true" if args.alle else "/v1/lock"
+    print(json.dumps(call("POST", pfad), ensure_ascii=False))
+
+
+def cmd_lock_status(args: argparse.Namespace) -> None:
+    out = call("GET", "/v1/unlock")
+    if not out["totp_aktiv"]:
+        print("Zweite Schranke: nicht eingerichtet")
+        return
+    print(f"Zweite Schranke: aktiv, Notfallcodes uebrig: "
+          f"{out.get('notfallcodes_uebrig', '?')}")
+    offen = out.get("offen")
+    if offen is None:
+        stand = f"noch {out['seconds_left']}s" if out["unlocked"] else "gesperrt"
+        print(f"  {out['token']}: {stand}")
+        return
+    if not offen:
+        print("  Keine offene Freischaltung.")
+    for eintrag in offen:
+        rest = int(eintrag["until"] - time.time())
+        print(f"  {eintrag['label']:<28} noch {rest}s")
+
+
 def cmd_token_issue(args: argparse.Namespace) -> None:
     out = call("POST", "/v1/control-tokens", {
         "label": args.label, "ceiling": args.ceiling,
@@ -336,6 +404,25 @@ def main() -> None:
     tr = sub.add_parser("token-revoke", help="Control-Token widerrufen")
     tr.add_argument("label")
     tr.set_defaults(func=cmd_token_revoke)
+
+    te = sub.add_parser("totp-enroll",
+                        help="zweite Schranke einrichten (Authenticator-App)")
+    te.set_defaults(func=cmd_totp_enroll)
+
+    td = sub.add_parser("totp-disable", help="zweite Schranke abschalten")
+    td.set_defaults(func=cmd_totp_disable)
+
+    u = sub.add_parser("unlock", help="dieses Token mit einem Code freischalten")
+    u.add_argument("code")
+    u.set_defaults(func=cmd_unlock)
+
+    lo = sub.add_parser("lock", help="Freischaltung beenden")
+    lo.add_argument("--alle", action="store_true",
+                    help="alle Sitzungen beenden (nur Master-Token)")
+    lo.set_defaults(func=cmd_lock)
+
+    ls = sub.add_parser("lock-status", help="wer ist gerade freigeschaltet")
+    ls.set_defaults(func=cmd_lock_status)
 
     k = sub.add_parser("killswitch", help="Not-Aus fuer alle Geraete")
     k.add_argument("state", choices=["on", "off"])

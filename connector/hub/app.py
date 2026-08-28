@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import push, security
+from . import push, security, totp
 from .store import Store
 
 DB_PATH = os.environ.get("CONNECTOR_DB", "/var/lib/skconnector/hub.db")
@@ -113,6 +113,31 @@ def require_device(authorization: str | None = Header(default=None)) -> dict:
     if device is None:
         raise HTTPException(403, "ungueltiges oder widerrufenes Geraete-Token")
     return device
+
+
+# Wie lange eine Freischaltung gilt. Kurz genug, dass ein uebernommener
+# Account nicht dauerhaft mitfaehrt; lang genug fuer eine Arbeitssitzung.
+UNLOCK_SEKUNDEN = float(os.environ.get("CONNECTOR_UNLOCK_SECONDS", "900"))
+
+
+def zweite_schranke(actor: "Aufrufer") -> None:
+    """Laesst nur durch, wenn dieses Token gerade freigeschaltet ist.
+
+    Das Master-Token ist ausgenommen: Es liegt in hub.env auf dem Server.
+    Wer dort hinkommt, ist root und braucht keinen Umweg - und ohne diese
+    Ausnahme gaebe es keinen Weg zurueck, wenn das Telefon verloren geht.
+    """
+    if not store.totp_aktiv() or actor.name == "control":
+        return
+    if store.entsperrt_bis(actor.name) > 0:
+        return
+    store.audit(actor.name, "unlock.required")
+    raise HTTPException(
+        401,
+        "Zweite Schranke: dieses Token ist nicht freigeschaltet. Bitte den "
+        "sechsstelligen Code aus der Authenticator-App erfragen und ueber "
+        "'unlock' eingeben.",
+    )
 
 
 def killswitch_active() -> bool:
@@ -253,6 +278,7 @@ def revoke_device(device_id: str, actor: Aufrufer = Depends(require_master)) -> 
 def issue_command(device_id: str, req: CommandRequest, actor: Aufrufer = Depends(require_control)) -> dict:
     if killswitch_active():
         raise HTTPException(423, "Kill-Switch ist aktiv - der Hub nimmt keine Kommandos an")
+    zweite_schranke(actor)
     device = store.get_device(device_id)
     if device is None:
         raise HTTPException(404, "unbekanntes Geraet")
@@ -333,6 +359,86 @@ def list_commands(device_id: str | None = None, limit: int = 50,
 def audit(limit: int = 100, device_id: str | None = None,
           actor: Aufrufer = Depends(require_control)) -> dict:
     return {"entries": store.audit_tail(min(limit, 500), device_id)}
+
+
+# ---------------------------------------------------------------------------
+# Zweite Schranke
+# ---------------------------------------------------------------------------
+
+
+class UnlockRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+
+
+@app.post("/v1/unlock")
+def unlock(req: UnlockRequest, actor: Aufrufer = Depends(require_control)) -> dict:
+    """Schaltet das aufrufende Token fuer eine begrenzte Zeit frei."""
+    if not store.totp_aktiv():
+        raise HTTPException(409, "Zweite Schranke ist nicht eingerichtet")
+    ok, meldung = store.entsperren(actor.name, req.code, UNLOCK_SEKUNDEN)
+    store.audit(actor.name, "unlock.ok" if ok else "unlock.failed", None, grund=meldung)
+    if not ok:
+        raise HTTPException(403, meldung)
+    return {"unlocked": True, "until": store.entsperrt_bis(actor.name),
+            "seconds": UNLOCK_SEKUNDEN, "note": meldung}
+
+
+@app.post("/v1/lock")
+def lock(alle: bool = False, actor: Aufrufer = Depends(require_control)) -> dict:
+    """Beendet die Freischaltung - fuer dieses Token oder fuer alle."""
+    if alle:
+        if actor.name != "control":
+            raise HTTPException(403, "Nur das Master-Token darf alle Sitzungen beenden")
+        anzahl = store.alles_sperren()
+        store.audit(actor.name, "lock.all", None, anzahl=anzahl)
+        return {"locked": True, "beendet": anzahl}
+    store.sperren(actor.name)
+    store.audit(actor.name, "lock")
+    return {"locked": True}
+
+
+@app.get("/v1/unlock")
+def unlock_status(actor: Aufrufer = Depends(require_control)) -> dict:
+    """Ob und wie lange dieses Token noch freigeschaltet ist."""
+    bis = store.entsperrt_bis(actor.name)
+    antwort = {
+        "totp_aktiv": store.totp_aktiv(),
+        "token": actor.name,
+        "unlocked": bis > 0,
+        "seconds_left": max(0, int(bis - time.time())) if bis else 0,
+    }
+    if actor.name == "control":
+        antwort["hinweis"] = "Master-Token - von der zweiten Schranke ausgenommen"
+        antwort["offen"] = store.offene_freischaltungen()
+        antwort["notfallcodes_uebrig"] = store.notfallcodes_uebrig()
+    return antwort
+
+
+@app.post("/v1/totp/enroll")
+def totp_enroll(actor: Aufrufer = Depends(require_master)) -> dict:
+    """Richtet die zweite Schranke ein - einmalig, nur mit dem Master-Token.
+
+    Geheimnis und Notfallcodes werden genau hier einmal ausgegeben. Danach
+    liegen nur noch das Geheimnis (fuer die Pruefung) und die Hashes der
+    Notfallcodes in der Datenbank.
+    """
+    geheim = totp.neues_geheimnis()
+    codes = totp.neue_notfallcodes()
+    store.totp_einrichten(geheim, codes)
+    store.audit(actor.name, "totp.enroll")
+    return {
+        "secret": geheim,
+        "otpauth": totp.otpauth_uri(geheim, "connector", "SK Connector"),
+        "recovery_codes": codes,
+        "hinweis": "Alle bisherigen Freischaltungen sind beendet.",
+    }
+
+
+@app.post("/v1/totp/disable")
+def totp_disable(actor: Aufrufer = Depends(require_master)) -> dict:
+    store.totp_abschalten()
+    store.audit(actor.name, "totp.disable")
+    return {"totp_aktiv": False}
 
 
 @app.post("/v1/killswitch/{state}")

@@ -26,6 +26,7 @@ ERWARTETE_WERKZEUGE = {
     "mail_accounts", "mail_list", "mail_search", "mail_read",
     "mail_draft", "mail_send",
     "notify", "shortcut", "command_status", "audit_log", "killswitch",
+    "unlock", "lock", "lock_status",
 }
 
 
