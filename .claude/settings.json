@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "allow": ["mcp__claude_ai_Mac_Simon"],
-    "ask": ["mcp__claude_ai_Mac_Simon__mail_send"]
+    "ask": ["mcp__claude_ai_Mac_Simon", "mcp__claude_ai_Hetzner", "mcp__claude_ai_Mac_Katya"]
   }
 }
