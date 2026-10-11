@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseVertragscheck, mailHtml, MAX_FILES } from '../src/worker/vertragscheck.js';
+import { parseVertragscheck, mailHtml, MAX_FILES } from '../src/worker/vertragscheck-parse.js';
 import { buildMime, b64bytes, wrap76 } from '../src/worker/mime.js';
 
 function fd(fields, files = []) {
