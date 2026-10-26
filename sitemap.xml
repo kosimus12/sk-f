@@ -127,4 +127,11 @@
   <url><loc>https://www.sk-finanzberatung.de/finanzwaschbaer/vertragscheck/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://www.sk-finanzberatung.de/renditerevier/vertragscheck/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://www.sk-finanzberatung.de/aktenundanlagen/vertragscheck/</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+
+  <url><loc>https://www.sk-finanzberatung.de/renditerevier/startpaket/</loc><lastmod>2026-10-26</lastmod></url>
+  <url><loc>https://www.sk-finanzberatung.de/finanzwaschbaer/startpaket/</loc><lastmod>2026-10-26</lastmod></url>
+  <url><loc>https://www.sk-finanzberatung.de/aktenundanlagen/startpaket/</loc><lastmod>2026-10-26</lastmod></url>
+  <url><loc>https://www.sk-finanzberatung.de/kfz-versicherung-wechseln/</loc><lastmod>2026-10-26</lastmod></url>
+  <url><loc>https://www.sk-finanzberatung.de/steuererklaerung-oeffentlicher-dienst/</loc><lastmod>2026-10-26</lastmod></url>
+  <url><loc>https://www.sk-finanzberatung.de/notfallordner/</loc><lastmod>2026-10-26</lastmod></url>
 </urlset>
