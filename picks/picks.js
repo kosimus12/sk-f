@@ -5,8 +5,10 @@
   var m=l.indexOf("de")===0?"de":(l==="en-gb"?"uk":"com");
   var host={de:"www.amazon.de",uk:"www.amazon.co.uk",com:"www.amazon.com"}[m];
   document.querySelectorAll("a[data-q]").forEach(function(a){
-    var u="https://"+host+"/s?k="+encodeURIComponent(a.getAttribute("data-q"));
-    if(T[m]) u+="&tag="+encodeURIComponent(T[m]);
-    a.href=u;
+    var asin=a.getAttribute("data-asin"), u;
+    if(asin&&m==="de") u="https://"+host+"/dp/"+asin+"?";
+    else u="https://"+host+"/s?k="+encodeURIComponent(a.getAttribute("data-q"))+"&";
+    if(T[m]) u+="tag="+encodeURIComponent(T[m]);
+    a.href=u.replace(/[?&]$/,"");
   });
 })();

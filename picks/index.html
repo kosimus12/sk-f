@@ -13,19 +13,22 @@ header.top{padding:40px 0 22px}
 h1{font-size:clamp(28px,6vw,42px);line-height:1.1;margin:16px 0 10px}
 .intro{color:var(--muted);margin:0 0 6px;max-width:640px}
 .disc{font-size:13px;color:var(--muted);margin:10px 0 0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:22px 0 40px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin:22px 0 40px}
 a.pick{display:flex;flex-direction:column;gap:6px;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;transition:transform .15s,border-color .15s}
 a.pick:hover,a.pick:focus-visible{transform:translateY(-2px);border-color:var(--brand)}
 .pick .ic{font-size:30px;line-height:1}
+.pick .img{background:#fff;border-radius:12px;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:6px}
+.pick .img img{width:100%;height:100%;object-fit:contain;padding:10px}
 .pick h2{font-size:17px;margin:6px 0 0}
 .pick p{margin:0;color:var(--muted);font-size:14px}
 .pick .go{margin-top:auto;padding-top:8px;font-weight:700;font-size:14px;color:var(--brand)}
 @media (prefers-color-scheme: light){.pick .go{color:var(--ink)}}
+@media (max-width:520px){a.pick{padding:12px;border-radius:14px}.pick h2{font-size:15px}.pick p{font-size:13px}.grid{gap:10px}}
 footer{border-top:1px solid var(--line);padding:18px 0 40px;font-size:13px;color:var(--muted)}
 footer a{color:inherit}
 .hub{display:grid;gap:14px;margin:24px 0 40px}
 :root{--brand:#7ED957;--ink:#10220a}</style></head>
-<body><div class="wrap"><header class="top"><h1>Moments Picks</h1><p class="intro">Fan picks from our channels.</p></header><main class="hub"><a class="pick" href="/picks/springfield/"><span class="ic">🍩</span><h2>Springfield Moments</h2><p>Official Simpsons stuff we&#x27;d actually buy. Every pick links to an Amazon search for licensed products.</p><span class="go">See picks →</span></a><a class="pick" href="/picks/quahog/"><span class="ic">🍺</span><h2>Quahog Moments</h2><p>Family Guy gear for the fans. Every pick links to an Amazon search for licensed products.</p><span class="go">See picks →</span></a><a class="pick" href="/picks/animals/"><span class="ic">🐾</span><h2>Best Animal Moments</h2><p>The stuff that makes pets as happy as the ones in our clips. Every pick links to an Amazon search.</p><span class="go">See picks →</span></a></main>
+<body><div class="wrap"><header class="top"><h1>Moments Picks</h1><p class="intro">Fan picks from our channels.</p></header><main class="hub"><a class="pick" href="/picks/springfield/"><span class="ic">🍩</span><h2>Springfield Moments</h2><p>Official Simpsons stuff we&#x27;d actually buy. Tap a product to see it on Amazon.</p><span class="go">See picks →</span></a><a class="pick" href="/picks/quahog/"><span class="ic">🍺</span><h2>Quahog Moments</h2><p>Family Guy gear for the fans. Tap a product to see it on Amazon.</p><span class="go">See picks →</span></a><a class="pick" href="/picks/animals/"><span class="ic">🐾</span><h2>Best Animal Moments</h2><p>The stuff that makes pets as happy as the ones in our clips. Tap a product to see it on Amazon.</p><span class="go">See picks →</span></a></main>
 <footer><p>As an Amazon Associate we earn from qualifying purchases. Prices and availability are set by Amazon.
 This page is a fan project and is not affiliated with or endorsed by the rights holders of the shows.</p>
 <p><a href="/impressum/">Legal notice (Impressum)</a> · <a href="/datenschutz/">Privacy (Datenschutz)</a> · <a href="/picks/">All picks</a></p></footer></div>
